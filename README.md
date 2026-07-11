@@ -6,47 +6,8 @@ It adds a `TPMS` page to the local GX UI, scans BLE tire-pressure sensor
 advertisements through BlueZ, and lets you bind discovered sensors to four
 wheel positions.
 
-## 中文快速说明
+[中文说明](README.zh-CN.md)
 
-这个项目用于在 Victron Venus OS / GX 设备上直接显示 BLE 胎压传感器数据。
-安装后，GX 本机界面会出现 `TPMS` 页面，可以扫描附近胎压传感器，并把传感器
-绑定到左前、右前、左后、右后四个轮位。
-
-安装前需要：
-
-- Venus OS / GX 设备可以联网；
-- 已经按 Victron 官方文档开启 SSH / root access；
-- 插入 Venus OS 支持的 USB 蓝牙适配器；
-- 胎压传感器正在广播 BLE 数据。
-
-开启 SSH 请参考官方文档：
-[Venus OS: Root Access](https://www.victronenergy.com/live/ccgx:root_access)
-
-SSH 登录 GX 设备后，运行一条命令即可安装：
-
-```sh
-wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/install.sh | sh
-```
-
-安装完成后，在 GX 设备列表中打开 `TPMS`：
-
-1. 等待 `Discovered` 列表出现胎压传感器；
-2. 打开某个传感器；
-3. 在 `Wheel` 中绑定到 `Front left`、`Front right`、`Rear left` 或 `Rear right`；
-4. 重复直到需要的轮位都绑定完成。
-
-显示含义：
-
-- `--`：未绑定传感器；
-- `wait`：已绑定，但本次启动后还没收到广播；
-- `6.17`：当前胎压，单位为 bar；
-- `6.17*`：旧的最后一次胎压，已经标记为 stale。
-
-卸载：
-
-```sh
-wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/uninstall.sh | sh
-```
 
 ## What You Get
 
