@@ -1,133 +1,174 @@
 # venus-tpms-ble
 
-Venus OS / CCGX integration for BLE TPMS sensors.
+BLE TPMS integration for Victron Venus OS / GX devices.
 
-The project installs a Venus-native Python service and a GX GUI page:
+It adds a `TPMS` page to the local GX UI, scans BLE tire-pressure sensor
+advertisements through BlueZ, and lets you bind discovered sensors to four
+wheel positions.
 
-- scans BLE advertisements through BlueZ D-Bus;
-- parses TPMS manufacturer data;
-- publishes `com.victronenergy.tpms.main`;
-- stores wheel bindings in Venus settings;
-- shows TPMS readings in the local GX/GGCX UI.
+## What You Get
 
-## Install
+- A `TPMS` entry in the GX device list.
+- Four wheel positions: front left, front right, rear left, rear right.
+- Discovered TPMS sensors with pressure, temperature, and RSSI for easier
+  identification.
+- Persistent wheel bindings.
+- Last-known readings after reboot, shown as `Stale` until fresh data arrives.
 
-Copy this repository to the Venus OS device, then run:
+## Requirements
+
+- Venus OS / GX device with SSH access.
+- A USB Bluetooth adapter supported by BlueZ.
+- BLE TPMS sensors that advertise compatible manufacturer data.
+
+Before installing, make sure Bluetooth is enabled in the GX settings if your
+device exposes that option.
+
+## Quick Install
+
+Enable SSH on the GX device, SSH into it, then run:
 
 ```sh
+cd /data
+rm -rf venus-tpms-ble-master venus-tpms-ble.zip
+wget -O venus-tpms-ble.zip https://github.com/jkqq147/venus-tpms-ble/archive/refs/heads/master.zip
+unzip venus-tpms-ble.zip
+cd venus-tpms-ble-master
 sh scripts/install.sh
 ```
 
-The installer:
+The installer starts the background scanner and adds the `TPMS` page to the GX
+UI.
 
-- copies the TPMS service to `/data/venus-tpms-ble/venus-tpms-ble.py`;
-- installs `PageTpms.qml`, `PageTpmsWheel.qml`, and `PageTpmsBind.qml`;
-- patches `PageMain.qml` to add a `TPMS` menu item;
-- backs up the original `PageMain.qml` under `/data/venus-tpms-ble/backups`;
-- creates `/service/venus-tpms-ble` for Venus runit supervision;
-- restarts the GX GUI.
+## First Setup
 
-After install, open the GX/GGCX `TPMS` page. Discovered sensors appear by their
-advertised name, for example `TPMS2_225C0A`. Select a discovered sensor and bind
-it to a wheel. The main device list shows four separate TPMS value blocks in
-wheel order: front left, front right, rear left, rear right.
+1. Open the local GX screen.
+2. Go to the device list and open `TPMS`.
+3. Wait for discovered sensors to appear.
+4. Open a discovered sensor.
+5. Set `Wheel` to one of:
+   - `Front left`
+   - `Front right`
+   - `Rear left`
+   - `Rear right`
+6. Repeat until all sensors are bound.
+
+The discovered list shows pressure, temperature, and RSSI, which helps identify
+which sensor is closest or currently active.
+
+## Display
+
+The device list shows four compact TPMS values, ordered as:
+
+```text
+front left / front right / rear left / rear right
+```
+
+Values mean:
+
+- `--`: no sensor assigned
+- `wait`: sensor assigned, but no reading received since service start
+- `6.17`: current pressure in bar
+- `6.17*`: stale last-known pressure
+
+Inside the `TPMS` page, each wheel shows pressure, temperature, and state. Open a
+wheel to see details such as sensor ID, battery, RSSI, and last seen time.
+
+## Check Status
+
+To check whether the service is running:
+
+```sh
+ps w | grep venus-tpms-ble.py | grep -v grep
+```
+
+To check the D-Bus status:
+
+```sh
+dbus-send --system --print-reply \
+  --dest=com.victronenergy.tpms.main \
+  /StatusText \
+  com.victronenergy.BusItem.GetValue
+```
+
+Expected value while scanning:
+
+```text
+Scanning
+```
+
+## Troubleshooting
+
+If no sensors appear:
+
+1. Confirm the USB Bluetooth adapter is detected.
+2. Confirm the service status is `Scanning`.
+3. Move the TPMS sensors closer to the GX device.
+4. Wait a few minutes; some TPMS sensors advertise infrequently.
+5. Wake the sensors by moving the vehicle or changing tire pressure slightly.
+
+The service automatically restarts BlueZ discovery if scanning is stopped by
+another process.
+
+If the `TPMS` menu does not appear immediately after install, restart the GX UI
+or reboot the GX device.
+
+For debug output:
+
+```sh
+svc -d /service/venus-tpms-ble
+VENUS_TPMS_DEBUG=1 python3 /data/venus-tpms-ble/venus-tpms-ble.py
+```
+
+Stop debug mode with `Ctrl-C`, then restart the service:
+
+```sh
+svc -u /service/venus-tpms-ble
+```
+
+## Update
+
+```sh
+cd /data
+rm -rf venus-tpms-ble-master venus-tpms-ble.zip
+wget -O venus-tpms-ble.zip https://github.com/jkqq147/venus-tpms-ble/archive/refs/heads/master.zip
+unzip venus-tpms-ble.zip
+cd venus-tpms-ble-master
+sh scripts/install.sh
+```
 
 ## Uninstall
 
 ```sh
+cd /data/venus-tpms-ble-master
 sh scripts/uninstall.sh
 ```
 
-The uninstaller stops the service, removes the TPMS GUI pages, restores
-`PageMain.qml` from the latest backup when available, and restarts the GUI.
+The uninstaller stops the service, removes the TPMS UI pages, restores
+`PageMain.qml` from backup when available, and restarts the GX UI.
 
-## Data Model
+## Notes
 
-The service publishes:
+- Wheel bindings are stored in Venus settings.
+- Only bound wheels persist last-known readings.
+- Unbound discovered sensors are not persisted across reboot.
+- Logs are disabled by default to avoid filling limited device storage.
+
+## Development
+
+The installed service publishes:
 
 ```text
 com.victronenergy.tpms.main
 ```
 
-Discovered sensors:
-
-```text
-/Discovered/0/Name
-/Discovered/0/SensorId
-/Discovered/0/AssignedWheel
-/Discovered/0/Pressure
-/Discovered/0/PressureDisplay
-/Discovered/0/Temperature
-/Discovered/0/TemperatureDisplay
-/Discovered/0/Battery
-/Discovered/0/Rssi
-/Discovered/0/RssiDisplay
-/Discovered/0/LastSeen
-/Discovered/0/ManufacturerData
-```
-
-The service keeps up to 10 discovered TPMS sensors visible. The list is sorted
-by RSSI so stronger nearby sensors appear first; empty rows are hidden in the
-GUI. Discovered rows show pressure, temperature, and RSSI to make binding easier.
-Already-bound sensors are kept in the discovered list when possible and are
-always available through `/Slots/*`.
-
-Wheel slots:
-
-```text
-/Slots/front_left/StateText
-/Slots/front_left/SensorId
-/Slots/front_left/Pressure
-/Slots/front_left/PressureDisplay
-/Slots/front_left/Temperature
-/Slots/front_left/TemperatureDisplay
-/Slots/front_left/Battery
-/Slots/front_left/Rssi
-/Slots/front_left/Summary
-/Slots/front_left/DeviceListValue
-```
-
-`/Slots/*` only shows bound sensors. Unbound wheels show `Unassigned`. The main
-TPMS page shows each wheel's pressure, temperature, and state in the native
-Venus list style; opening a wheel shows the full details.
-
-The device-list TPMS entry uses `/Slots/*/DeviceListValue` for four separate
-value blocks, for example:
-
-```text
---  wait  --  --
-```
-
-`--` means unassigned, `wait` means bound but not yet seen, and `*` marks a
-stale last-known pressure.
-
-Bindings are persisted in Venus settings:
-
-```text
-/Settings/Tpms/FrontLeftSensorId
-/Settings/Tpms/FrontRightSensorId
-/Settings/Tpms/RearLeftSensorId
-/Settings/Tpms/RearRightSensorId
-```
-
-The last real reading for each bound wheel is also persisted. After a reboot,
-if a bound sensor has not advertised yet, the slot shows the last known reading
-as `Stale` instead of presenting it as live data. If there is no stored reading
-for that binding, the slot shows `Waiting` until the first advertisement is
-received.
-
-The GUI writes `/Discovered/<n>/AssignedWheel`; the service enforces one-to-one
-binding and updates Venus settings.
-
-## Development
-
-Run the real scanner manually:
+Run the scanner manually during development:
 
 ```sh
 python3 service/venus-tpms-ble.py
 ```
 
-For GUI development without waiting for BLE advertisements, use the mock helper:
+Run mock data for UI development:
 
 ```sh
 python3 tools/mock_tpms_dbus.py
@@ -136,11 +177,3 @@ python3 tools/mock_tpms_dbus.py
 Protocol parsing should stay aligned with the `tpms-ble-parser` project. The
 Venus service owns BlueZ scanning, D-Bus publishing, GUI integration, binding
 state, stale handling, and install/uninstall behavior.
-
-The installed service discards stdout/stderr by default to avoid filling limited
-storage. For debugging, stop the service and run it manually:
-
-```sh
-svc -d /service/venus-tpms-ble
-VENUS_TPMS_DEBUG=1 python3 /data/venus-tpms-ble/venus-tpms-ble.py
-```
