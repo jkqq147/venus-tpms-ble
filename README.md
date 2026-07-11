@@ -29,16 +29,19 @@ device exposes that option.
 Enable SSH on the GX device, SSH into it, then run:
 
 ```sh
-cd /data
+cd /tmp
 rm -rf venus-tpms-ble-master venus-tpms-ble.zip
 wget -O venus-tpms-ble.zip https://github.com/jkqq147/venus-tpms-ble/archive/refs/heads/master.zip
 unzip venus-tpms-ble.zip
 cd venus-tpms-ble-master
 sh scripts/install.sh
+cd /tmp
+rm -rf venus-tpms-ble-master venus-tpms-ble.zip
 ```
 
 The installer starts the background scanner and adds the `TPMS` page to the GX
-UI.
+UI. Runtime files are copied to `/data/venus-tpms-ble`; the downloaded zip and
+extracted source directory are only temporary.
 
 ## First Setup
 
@@ -129,19 +132,27 @@ svc -u /service/venus-tpms-ble
 ## Update
 
 ```sh
-cd /data
+cd /tmp
 rm -rf venus-tpms-ble-master venus-tpms-ble.zip
 wget -O venus-tpms-ble.zip https://github.com/jkqq147/venus-tpms-ble/archive/refs/heads/master.zip
 unzip venus-tpms-ble.zip
 cd venus-tpms-ble-master
 sh scripts/install.sh
+cd /tmp
+rm -rf venus-tpms-ble-master venus-tpms-ble.zip
 ```
 
 ## Uninstall
 
 ```sh
-cd /data/venus-tpms-ble-master
+cd /tmp
+rm -rf venus-tpms-ble-master venus-tpms-ble.zip
+wget -O venus-tpms-ble.zip https://github.com/jkqq147/venus-tpms-ble/archive/refs/heads/master.zip
+unzip venus-tpms-ble.zip
+cd venus-tpms-ble-master
 sh scripts/uninstall.sh
+cd /tmp
+rm -rf venus-tpms-ble-master venus-tpms-ble.zip
 ```
 
 The uninstaller stops the service, removes the TPMS UI pages, restores
