@@ -23,7 +23,8 @@ SSH 登录 GX 设备后，运行：
 wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/install.sh | sh
 ```
 
-安装脚本会自动下载、解压、安装并清理临时文件。运行文件会安装到：
+安装脚本会自动下载、解压、安装并清理临时文件。安装过程中会重启 GX 图形界面，
+用于加载新的 `TPMS` 菜单；不会重启整个 GX 设备。运行文件会安装到：
 
 ```text
 /data/venus-tpms-ble

@@ -36,9 +36,10 @@ SSH into it, then run:
 wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/install.sh | sh
 ```
 
-The installer starts the background scanner and adds the `TPMS` page to the GX
-UI. Runtime files are copied to `/data/venus-tpms-ble`; temporary download files
-are cleaned automatically.
+The installer starts the background scanner, adds the `TPMS` page to the GX UI,
+and restarts the GX UI so the new menu is loaded. It does not reboot the whole
+GX device. Runtime files are copied to `/data/venus-tpms-ble`; temporary
+download files are cleaned automatically.
 
 ## First Setup
 
