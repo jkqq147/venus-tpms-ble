@@ -47,6 +47,21 @@ MbPage {
 			item.bind: "com.victronenergy.tpms.main/StatusText"
 		}
 
+		MbItemValue {
+			description: qsTr("Bluetooth")
+			item.bind: "com.victronenergy.tpms.main/Bluetooth/StatusText"
+		}
+
+		MbItemValue {
+			description: qsTr("BLE devices")
+			item.bind: "com.victronenergy.tpms.main/Bluetooth/DeviceCount"
+		}
+
+		MbItemValue {
+			description: qsTr("BLE manufacturer data")
+			item.bind: "com.victronenergy.tpms.main/Bluetooth/ManufacturerDataCount"
+		}
+
 		MbSubMenu {
 			description: qsTr("Discovered 1")
 			item: VBusItem { value: [] }

@@ -62,6 +62,8 @@ wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/instal
 
 进入 `TPMS` 页面后，每个轮位会显示胎压、温度和状态。打开某个轮位可以查看传感器 ID、电量、RSSI 和最后接收时间。
 
+同一页面也会显示蓝牙状态和 BLE 设备数量。如果 `Bluetooth` 不是 `Scanning`，优先检查蓝牙适配器或 BlueZ discovery。
+
 ## 更新
 
 ```sh

@@ -99,6 +99,11 @@ class TpmsBluezService:
         self.service.add_path("/StatusText", "Starting")
         self.service.add_path("/DiscoveredCount", 0)
         self.service.add_path("/Overview", "FL --  FR -- / RL --  RR --")
+        self.service.add_path("/Bluetooth/StatusText", "Starting")
+        self.service.add_path("/Bluetooth/Adapter", "")
+        self.service.add_path("/Bluetooth/Discovering", 0)
+        self.service.add_path("/Bluetooth/DeviceCount", 0)
+        self.service.add_path("/Bluetooth/ManufacturerDataCount", 0)
 
         self._ensure_settings()
         self._add_slot_paths()
@@ -188,6 +193,7 @@ class TpmsBluezService:
                 self.adapter_path = path
                 break
         if self.adapter_path is None:
+            self.service["/Bluetooth/StatusText"] = "No adapter"
             raise RuntimeError("No BlueZ adapter found")
 
         self.adapter = dbus.Interface(self.bus.get_object("org.bluez", self.adapter_path), "org.bluez.Adapter1")
@@ -195,6 +201,8 @@ class TpmsBluezService:
             self.bus.get_object("org.bluez", self.adapter_path),
             "org.freedesktop.DBus.Properties",
         )
+        self.service["/Bluetooth/Adapter"] = self.adapter_path
+        self._update_bluetooth_counts(objects)
         self.bus.add_signal_receiver(
             self._interfaces_added,
             dbus_interface="org.freedesktop.DBus.ObjectManager",
@@ -217,20 +225,31 @@ class TpmsBluezService:
         self.discovery_started = True
         self.service["/Status"] = 0
         self.service["/StatusText"] = "Scanning"
+        self.service["/Bluetooth/StatusText"] = "Scanning"
+        self.service["/Bluetooth/Discovering"] = 1
 
     def _ensure_discovery(self):
         if self.adapter is None:
             return
         try:
             discovering = bool(self.adapter_properties.Get("org.bluez.Adapter1", "Discovering"))
+            objects = dbus.Interface(
+                self.bus.get_object("org.bluez", "/"),
+                "org.freedesktop.DBus.ObjectManager",
+            ).GetManagedObjects()
         except Exception as exc:
             self.service["/Status"] = 2
             self.service["/StatusText"] = "BlueZ unavailable"
+            self.service["/Bluetooth/StatusText"] = "Unavailable"
+            self.service["/Bluetooth/Discovering"] = 0
             debug(f"Discovering check failed: {exc}")
             return
+        self._update_bluetooth_counts(objects)
         if discovering:
             self.service["/Status"] = 0
             self.service["/StatusText"] = "Scanning"
+            self.service["/Bluetooth/StatusText"] = "Scanning"
+            self.service["/Bluetooth/Discovering"] = 1
             return
         try:
             self._start_discovery()
@@ -238,7 +257,22 @@ class TpmsBluezService:
         except Exception as exc:
             self.service["/Status"] = 2
             self.service["/StatusText"] = "Scan stopped"
+            self.service["/Bluetooth/StatusText"] = "Scan stopped"
+            self.service["/Bluetooth/Discovering"] = 0
             debug(f"StartDiscovery failed: {exc}")
+
+    def _update_bluetooth_counts(self, objects):
+        device_count = 0
+        manufacturer_data_count = 0
+        for _path, ifaces in objects.items():
+            props = ifaces.get("org.bluez.Device1")
+            if props is None:
+                continue
+            device_count += 1
+            if props.get("ManufacturerData"):
+                manufacturer_data_count += 1
+        self.service["/Bluetooth/DeviceCount"] = device_count
+        self.service["/Bluetooth/ManufacturerDataCount"] = manufacturer_data_count
 
     def _interfaces_added(self, path, ifaces):
         props = ifaces.get("org.bluez.Device1")

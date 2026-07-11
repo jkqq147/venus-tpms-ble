@@ -75,6 +75,9 @@ Values mean:
 Inside the `TPMS` page, each wheel shows pressure, temperature, and state. Open a
 wheel to see details such as sensor ID, battery, RSSI, and last seen time.
 
+The same page also shows Bluetooth status and BLE device counts. If `Bluetooth`
+is not `Scanning`, the adapter or BlueZ discovery needs attention.
+
 ## Check Status
 
 To check whether the service is running:
