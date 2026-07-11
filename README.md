@@ -26,7 +26,8 @@ device exposes that option.
 
 ## Quick Install
 
-Enable SSH on the GX device, SSH into it, then run:
+[Enable SSH / root access on the GX device](https://www.victronenergy.com/live/ccgx:root_access),
+SSH into it, then run:
 
 ```sh
 wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/install.sh | sh
