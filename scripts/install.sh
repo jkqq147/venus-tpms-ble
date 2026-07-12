@@ -234,11 +234,13 @@ EOF
 }
 
 patch_page_main() {
+	grep -q 'BEGIN venus-tpms-ui' "$PAGE_MAIN" 2>/dev/null && return 0
 	grep -q 'PageTpms' "$PAGE_MAIN" 2>/dev/null && return 0
 
 	menu="$TRIAL_DIR/PageTpms-menu.qml"
 	patched="$TRIAL_DIR/PageMain.qml.patched"
 	cat >"$menu" <<'EOF'
+			// BEGIN venus-tpms-ui
 			MbSubMenu {
 				description: qsTr("TPMS")
 				item: VBusItem { value: [] }
@@ -248,6 +250,7 @@ patch_page_main() {
 				MbTextBlock { item.bind: "com.victronenergy.tpms.main/Slots/rear_right/DeviceListValue"; width: 62; height: 25 }
 				subpage: Component { PageTpms {} }
 			}
+			// END venus-tpms-ui
 EOF
 
 	awk -v menu="$menu" '

@@ -10,7 +10,6 @@ BOOT_MARKER_BEGIN="# BEGIN venus-tpms-ble"
 BOOT_MARKER_END="# END venus-tpms-ble"
 GUI_DIR="/opt/victronenergy/gui/qml"
 PAGE_MAIN="$GUI_DIR/PageMain.qml"
-BACKUP_DIR="$APP_DIR/backups"
 TRIAL_DIR="/data/venus-tpms-ble-trial"
 TRIAL_SERVICE_LINK="/service/venus-tpms-ble-trial"
 TRIAL_GUARD_LINK="/service/venus-tpms-ble-trial-guard"
@@ -41,22 +40,13 @@ if [ -f "$BOOT_HOOK" ] && grep -q "^$BOOT_MARKER_BEGIN\$" "$BOOT_HOOK"; then
 fi
 rm -f "$BOOT_START"
 
-latest_backup=""
-if [ -f "$BACKUP_DIR/PageMain.qml.original" ]; then
-	latest_backup="$BACKUP_DIR/PageMain.qml.original"
-elif [ -d "$BACKUP_DIR" ]; then
-	for backup in "$BACKUP_DIR"/PageMain.qml.*; do
-		[ -f "$backup" ] || continue
-		latest_backup="$backup"
-	done
-fi
-
-if [ -n "$latest_backup" ]; then
-	cp "$latest_backup" "$PAGE_MAIN"
-	echo "Restored PageMain.qml from $latest_backup"
-else
-	if [ -f "$PAGE_MAIN" ] && grep -q 'PageTpms' "$PAGE_MAIN"; then
-		patched="$APP_DIR/PageMain.qml.uninstall.$$"
+	if [ -f "$PAGE_MAIN" ] && grep -q 'BEGIN venus-tpms-ui' "$PAGE_MAIN"; then
+		patched="/tmp/PageMain.qml.venus-tpms.$$"
+		sed '/^[[:space:]]*\/\/ BEGIN venus-tpms-ui$/,/^[[:space:]]*\/\/ END venus-tpms-ui$/d' \
+			"$PAGE_MAIN" >"$patched"
+		mv "$patched" "$PAGE_MAIN"
+	elif [ -f "$PAGE_MAIN" ] && grep -q 'PageTpms' "$PAGE_MAIN"; then
+		patched="/tmp/PageMain.qml.venus-tpms.$$"
 		awk '
 			{ lines[NR] = $0 }
 			END {
@@ -84,7 +74,6 @@ else
 		' "$PAGE_MAIN" >"$patched"
 		mv "$patched" "$PAGE_MAIN"
 	fi
-fi
 
 rm -f \
 	"$GUI_DIR/PageTpms.qml" \
