@@ -11,6 +11,15 @@ BOOT_MARKER_BEGIN="# BEGIN venus-tpms-ble"
 BOOT_MARKER_END="# END venus-tpms-ble"
 TRIAL_BOOT_MARKER_BEGIN="# BEGIN venus-tpms-ble-trial"
 TRIAL_BOOT_MARKER_END="# END venus-tpms-ble-trial"
+
+stop_trial_services() {
+	command -v svc >/dev/null 2>&1 || return 0
+	for service in "$TRIAL_SERVICE_LINK" "$TRIAL_GUARD_LINK"; do
+		[ -e "$service" ] || [ -L "$service" ] || continue
+		# Exit supervise before removing the service link so runit cannot retain it.
+		svc -dx "$service" 2>/dev/null || true
+	done
+}
 GUI_DIR="/opt/victronenergy/gui/qml"
 PAGE_MAIN="$GUI_DIR/PageMain.qml"
 OVERVIEW_MAIN="$GUI_DIR/main.qml"
@@ -148,6 +157,15 @@ BOOT_HOOK="/data/rc.local"
 TRIAL_BOOT_MARKER_BEGIN="# BEGIN venus-tpms-ble-trial"
 TRIAL_BOOT_MARKER_END="# END venus-tpms-ble-trial"
 
+stop_trial_services() {
+	command -v svc >/dev/null 2>&1 || return 0
+	for service in "$TRIAL_SERVICE_LINK" "$TRIAL_GUARD_LINK"; do
+		[ -e "$service" ] || [ -L "$service" ] || continue
+		# Exit supervise before removing the service link so runit cannot retain it.
+		svc -dx "$service" 2>/dev/null || true
+	done
+}
+
 restore_target() {
 	target="$1"
 	name="$2"
@@ -171,9 +189,7 @@ if [ -f "$BOOT_HOOK" ] && grep -q "^$TRIAL_BOOT_MARKER_BEGIN\$" "$BOOT_HOOK"; th
 	chmod 0755 "$BOOT_HOOK"
 fi
 
-if command -v svc >/dev/null 2>&1 && [ -e "$TRIAL_SERVICE_LINK" ]; then
-	svc -d "$TRIAL_SERVICE_LINK" 2>/dev/null || true
-fi
+stop_trial_services
 rm -f "$TRIAL_SERVICE_LINK" "$TRIAL_GUARD_LINK"
 
 restore_target "$PAGE_MAIN" "PageMain.qml"
@@ -492,6 +508,8 @@ rollback_trial() {
 	if [ -f "$TRIAL_DIR/recover.sh" ]; then
 		sh "$TRIAL_DIR/recover.sh" || true
 	fi
+	stop_trial_services
+	rm -f "$TRIAL_SERVICE_LINK" "$TRIAL_GUARD_LINK"
 	rm -rf "$TRIAL_DIR"
 }
 
@@ -571,6 +589,7 @@ ln -s "$TRIAL_GUARD_DIR" "$TRIAL_GUARD_LINK"
 trial_started=1
 if ! install_trial_boot_hook; then
 	say "${RED}Unable to create the protected trial recovery hook; no UI changes were made.${RESET}"
+	stop_trial_services
 	rm -f "$TRIAL_GUARD_LINK"
 	rm -rf "$TRIAL_DIR"
 	trial_started=0
@@ -665,8 +684,7 @@ if [ ! -f "$BACKUP_DIR/PageMain.qml.original" ] && [ -z "$(latest_managed_backup
 fi
 
 printf 'confirmed\n' >"$TRIAL_STATE"
-svc -d "$TRIAL_SERVICE_LINK" 2>/dev/null || true
-svc -d "$TRIAL_GUARD_LINK" 2>/dev/null || true
+stop_trial_services
 rm -f "$TRIAL_SERVICE_LINK" "$TRIAL_GUARD_LINK"
 remove_trial_boot_hook
 

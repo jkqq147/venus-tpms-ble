@@ -15,13 +15,19 @@ TRIAL_DIR="/data/venus-tpms-ble-trial"
 TRIAL_SERVICE_LINK="/service/venus-tpms-ble-trial"
 TRIAL_GUARD_LINK="/service/venus-tpms-ble-trial-guard"
 
+stop_trial_services() {
+	command -v svc >/dev/null 2>&1 || return 0
+	for service in "$TRIAL_SERVICE_LINK" "$TRIAL_GUARD_LINK"; do
+		[ -e "$service" ] || [ -L "$service" ] || continue
+		# Exit supervise before removing the service link so runit cannot retain it.
+		svc -dx "$service" 2>/dev/null || true
+	done
+}
+
 if [ -f "$TRIAL_DIR/recover.sh" ] && [ "$(cat "$TRIAL_DIR/state" 2>/dev/null || true)" = "running" ]; then
 	sh "$TRIAL_DIR/recover.sh" || true
 fi
-if command -v svc >/dev/null 2>&1; then
-	svc -d "$TRIAL_SERVICE_LINK" 2>/dev/null || true
-	svc -d "$TRIAL_GUARD_LINK" 2>/dev/null || true
-fi
+stop_trial_services
 rm -f "$TRIAL_SERVICE_LINK" "$TRIAL_GUARD_LINK"
 rm -rf "$TRIAL_DIR"
 
