@@ -2,7 +2,10 @@ import QtQuick 1.1
 import com.victron.velib 1.0
 
 MbPage {
-	title: qsTr("Discover sensors")
+	id: root
+	property VBusItem guiLanguage: VBusItem { bind: "com.victronenergy.settings/Settings/Gui/Language" }
+	property bool isChinese: guiLanguage.valid && guiLanguage.value === "zh"
+	title: root.isChinese ? "扫描传感器" : qsTr("Discover sensors")
 
 	model: VisibleItemModel {
 		MbSubMenu {
