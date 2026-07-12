@@ -23,19 +23,35 @@ SSH 登录 GX 设备后，运行：
 wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/install.sh | sh
 ```
 
-安装脚本会自动下载、解压、安装并清理临时文件。安装过程中会重启 GX 图形界面，
-用于加载新的 `TPMS` 菜单；不会重启整个 GX 设备。运行文件会安装到：
+安装脚本会先启动受保护的临时试验：加载 `TPMS` 菜单、临时启动扫描服务，并重启
+GX 图形界面；不会重启整个 GX 设备。在本机屏幕确认页面正常后，在 SSH 终端输入
+`CONFIRM`，才会转为永久安装并启用开机启动。输入其他内容会恢复原 UI。下载临时文件
+会自动清理。永久运行文件会安装到：
 
 ```text
 /data/venus-tpms-ble
 ```
 
-Venus OS 可以正常升级。系统升级可能替换 GX 的界面文件；升级完成后再次运行同一条
-安装命令，即可恢复 `TPMS` 菜单和界面接入。
+脚本在写入任何持久内容前会显示 Venus OS 版本和 `PageMain.qml` 档案。第一个提示输入
+`n` 时不会做任何修改。未知档案也只能先进入受保护试验，仍须输入 `CONFIRM` 才会永久安装；
+GUI crash loop、超时或重启都会恢复原 UI。
+
+Venus OS 升级会替换 `/opt` 下的 GX UI 文件。每次升级完成后，都需要再次运行同一条
+安装命令，并重新完成受保护试验后确认新的 UI 接入。
 
 服务不绑定特定蓝牙型号或 `hci` 编号，而是使用 BlueZ 中编号最小、可扫描 BLE 的适配器。
 运行中可以插拔 USB 蓝牙适配器：拔出后扫描暂停，重新出现后会自动恢复；已绑定轮位会保留
 最后一次读数。
+
+### 重启与 Venus OS 升级后
+
+普通重启后无需重新安装：运行文件位于持久化的 `/data`，安装脚本会在
+`/data/rc.local` 中写入一个带标记、可由卸载脚本移除的启动项，用来重建位于易失
+`/service` 目录中的 runit 服务链接。
+
+Venus OS 升级会移除 `TPMS` 菜单和 QML 页面，即使 `/data` 中的运行文件仍保留。
+**每次 Venus OS 升级后，都必须再次运行同一条一键安装命令，并完成受保护试验后输入
+`CONFIRM`。**
 
 ## 首次设置
 
@@ -89,6 +105,9 @@ wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/instal
 ```sh
 wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/uninstall.sh | sh
 ```
+
+卸载脚本会停止服务、移除自己在 `/data/rc.local` 中写入的带标记启动项、恢复可用的
+`PageMain.qml` 备份并重启 GX 图形界面；不会改动该文件中的其他用户启动命令。
 
 ## 排查
 

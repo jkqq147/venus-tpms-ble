@@ -36,20 +36,38 @@ SSH into it, then run:
 wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/install.sh | sh
 ```
 
-The installer starts the background scanner, adds the `TPMS` page to the GX UI,
-and restarts the GX UI so the new menu is loaded. It does not reboot the whole
-GX device. Runtime files are copied to `/data/venus-tpms-ble`; temporary
-download files are cleaned automatically.
+The installer first starts a protected temporary trial. It adds the `TPMS` page,
+starts a temporary scanner, and restarts only the GX UI, not the whole GX device.
+Check the page on the local screen, then type `CONFIRM` in the SSH terminal to
+make the installation permanent and enable startup after reboot. Entering any
+other value restores the original UI. Temporary download files are cleaned
+automatically.
 
-Venus OS updates are supported. Because the GX UI files can be replaced by an
-OS update, run the same install command once after an update to restore the
-`TPMS` menu and its UI integration.
+Before any persistent change, the installer shows the Venus OS version and the
+`PageMain.qml` profile. Entering `n` at the first prompt makes no changes. An
+unknown profile begins only as a protected temporary trial and still requires
+`CONFIRM` before it can become permanent; a GUI crash loop, timeout, or reboot
+restores the original UI.
+
+Venus OS updates replace the GX UI files under `/opt`. Run the same command
+after every update and repeat the protected trial before confirming the refreshed
+UI integration.
 
 The service does not bind to a specific adapter model or `hci` number. It uses
 the lowest-numbered BlueZ adapter that can scan BLE. You can insert or remove a
 USB adapter while it is running: scanning pauses while no adapter is present and
 automatically resumes when an adapter reappears. Bound wheels retain their last
 known readings during that interruption.
+
+### After a reboot or Venus OS update
+
+A normal GX reboot keeps the installation: runtime files are stored in `/data`,
+and the installer adds a marked, removable entry to `/data/rc.local` that
+recreates the runit service link in the volatile `/service` directory.
+
+A Venus OS update removes the `TPMS` menu and QML pages, even though the runtime
+files in `/data` remain. **After every Venus OS update, run the same one-line
+install command and complete the protected trial again.**
 
 ## First Setup
 
@@ -161,8 +179,9 @@ wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/instal
 wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/uninstall.sh | sh
 ```
 
-The uninstaller stops the service, removes the TPMS UI pages, restores
-`PageMain.qml` from backup when available, and restarts the GX UI.
+The uninstaller stops the service, removes its marked `/data/rc.local` startup
+entry, removes the TPMS UI pages, restores `PageMain.qml` from backup when
+available, and restarts the GX UI.
 
 ## Notes
 
