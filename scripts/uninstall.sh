@@ -45,34 +45,6 @@ rm -f "$BOOT_START"
 		sed '/^[[:space:]]*\/\/ BEGIN venus-tpms-ui$/,/^[[:space:]]*\/\/ END venus-tpms-ui$/d' \
 			"$PAGE_MAIN" >"$patched"
 		mv "$patched" "$PAGE_MAIN"
-	elif [ -f "$PAGE_MAIN" ] && grep -q 'PageTpms' "$PAGE_MAIN"; then
-		patched="/tmp/PageMain.qml.venus-tpms.$$"
-		awk '
-			{ lines[NR] = $0 }
-			END {
-				target = 0
-				for (i = 1; i <= NR; i++) {
-					if (lines[i] ~ /description: qsTr\("TPMS"\)/) { target = i; break }
-				}
-				start = 0
-				for (i = target; i >= 1; i--) {
-					if (lines[i] ~ /MbSubMenu[[:space:]]*\{/) { start = i; break }
-				}
-				end = 0
-				depth = 0
-				for (i = start; start && i <= NR; i++) {
-					line = lines[i]
-					opens = gsub(/\{/, "{", line)
-					closes = gsub(/\}/, "}", line)
-					depth += opens - closes
-					if (depth == 0) { end = i; break }
-				}
-				for (i = 1; i <= NR; i++) {
-					if (!start || !end || i < start || i > end) print lines[i]
-				}
-			}
-		' "$PAGE_MAIN" >"$patched"
-		mv "$patched" "$PAGE_MAIN"
 	fi
 
 rm -f \
