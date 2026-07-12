@@ -10,6 +10,7 @@ BOOT_MARKER_BEGIN="# BEGIN venus-tpms-ble"
 BOOT_MARKER_END="# END venus-tpms-ble"
 GUI_DIR="/opt/victronenergy/gui/qml"
 PAGE_MAIN="$GUI_DIR/PageMain.qml"
+OVERVIEW_MAIN="$GUI_DIR/main.qml"
 TRIAL_DIR="/data/venus-tpms-ble-trial"
 TRIAL_SERVICE_LINK="/service/venus-tpms-ble-trial"
 TRIAL_GUARD_LINK="/service/venus-tpms-ble-trial-guard"
@@ -46,6 +47,12 @@ rm -f "$BOOT_START"
 			"$PAGE_MAIN" >"$patched"
 		mv "$patched" "$PAGE_MAIN"
 	fi
+	if [ -f "$OVERVIEW_MAIN" ] && grep -q 'BEGIN venus-tpms-overview' "$OVERVIEW_MAIN"; then
+		patched="/tmp/main.qml.venus-tpms.$$"
+		sed '/^[[:space:]]*\/\/ BEGIN venus-tpms-overview$/,/^[[:space:]]*\/\/ END venus-tpms-overview$/d' \
+			"$OVERVIEW_MAIN" >"$patched"
+		mv "$patched" "$OVERVIEW_MAIN"
+	fi
 
 rm -f \
 	"$GUI_DIR/PageTpms.qml" \
@@ -53,7 +60,8 @@ rm -f \
 	"$GUI_DIR/PageTpmsDiagnostics.qml" \
 	"$GUI_DIR/PageTpmsDiscovered.qml" \
 	"$GUI_DIR/PageTpmsSensorDetails.qml" \
-	"$GUI_DIR/PageTpmsWheel.qml"
+	"$GUI_DIR/PageTpmsWheel.qml" \
+	"$GUI_DIR/OverviewTpms.qml"
 
 if command -v svc >/dev/null 2>&1; then
 	svc -t /service/gui 2>/dev/null || true

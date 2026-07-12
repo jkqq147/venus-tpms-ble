@@ -13,6 +13,7 @@ TRIAL_BOOT_MARKER_BEGIN="# BEGIN venus-tpms-ble-trial"
 TRIAL_BOOT_MARKER_END="# END venus-tpms-ble-trial"
 GUI_DIR="/opt/victronenergy/gui/qml"
 PAGE_MAIN="$GUI_DIR/PageMain.qml"
+OVERVIEW_MAIN="$GUI_DIR/main.qml"
 BACKUP_DIR="$APP_DIR/backups"
 BINARY_NAME="venus-tpms-ble-armv7-musl"
 BINARY_VERSION="v0.1.0"
@@ -34,6 +35,7 @@ BUNDLED_BINARY="$REPO_DIR/dist/$BINARY_NAME"
 
 # This table intentionally fails closed. Add a profile only after real GX testing.
 SUPPORTED_PROFILE_V355="2b231c72b3a178e2110171c8cfdc693ead829eafc47c19dcaba9a6746a3b3943"
+SUPPORTED_OVERVIEW_V355="c1fe0779ea129a963c3f47b950c2f4b7b15f92660f77dcf64ee5f81dab34208e"
 
 if [ ! -r "$TTY" ] || [ ! -w "$TTY" ]; then
 	echo "ERROR: an interactive SSH terminal is required; no changes were made." >&2
@@ -103,6 +105,21 @@ profile_is_supported() {
 	return 1
 }
 
+overview_profile_is_supported() {
+	version="$1"
+	overview_hash="$2"
+	case "$version:$overview_hash" in
+		v3.55:"$SUPPORTED_OVERVIEW_V355") return 0 ;;
+	esac
+
+	if [ "$version" = v3.55 ] &&
+		grep -q 'BEGIN venus-tpms-overview' "$OVERVIEW_MAIN" 2>/dev/null &&
+		grep -q 'pageSource: "OverviewTpms.qml"' "$OVERVIEW_MAIN" 2>/dev/null; then
+		return 0
+	fi
+	return 1
+}
+
 backup_target() {
 	target="$1"
 	name="$2"
@@ -123,6 +140,7 @@ TRIAL_DIR="/data/venus-tpms-ble-trial"
 BACKUP_DIR="$TRIAL_DIR/backups"
 GUI_DIR="/opt/victronenergy/gui/qml"
 PAGE_MAIN="$GUI_DIR/PageMain.qml"
+OVERVIEW_MAIN="$GUI_DIR/main.qml"
 SERVICE_LINK="/service/venus-tpms-ble"
 TRIAL_SERVICE_LINK="/service/venus-tpms-ble-trial"
 TRIAL_GUARD_LINK="/service/venus-tpms-ble-trial-guard"
@@ -159,12 +177,14 @@ fi
 rm -f "$TRIAL_SERVICE_LINK" "$TRIAL_GUARD_LINK"
 
 restore_target "$PAGE_MAIN" "PageMain.qml"
+restore_target "$OVERVIEW_MAIN" "main.qml"
 restore_target "$GUI_DIR/PageTpms.qml" "PageTpms.qml"
 restore_target "$GUI_DIR/PageTpmsBind.qml" "PageTpmsBind.qml"
 restore_target "$GUI_DIR/PageTpmsDiagnostics.qml" "PageTpmsDiagnostics.qml"
 restore_target "$GUI_DIR/PageTpmsDiscovered.qml" "PageTpmsDiscovered.qml"
 restore_target "$GUI_DIR/PageTpmsSensorDetails.qml" "PageTpmsSensorDetails.qml"
 restore_target "$GUI_DIR/PageTpmsWheel.qml" "PageTpmsWheel.qml"
+restore_target "$GUI_DIR/OverviewTpms.qml" "OverviewTpms.qml"
 
 if command -v svc >/dev/null 2>&1; then
 	svc -t /service/gui 2>/dev/null || true
@@ -233,7 +253,7 @@ EOF
 	chmod 0755 "$TRIAL_GUARD_DIR/run"
 }
 
-patch_page_main() {
+patch_tpms_menu() {
 	grep -q 'BEGIN venus-tpms-ui' "$PAGE_MAIN" 2>/dev/null && return 0
 	grep -q 'PageTpms' "$PAGE_MAIN" 2>/dev/null && return 0
 
@@ -277,6 +297,32 @@ EOF
 		}
 	' "$PAGE_MAIN" >"$patched" || return 1
 	mv "$patched" "$PAGE_MAIN"
+}
+
+patch_tpms_overview() {
+	grep -q 'BEGIN venus-tpms-overview' "$OVERVIEW_MAIN" 2>/dev/null && return 0
+
+	menu="$TRIAL_DIR/OverviewTpms-overview.qml"
+	patched="$TRIAL_DIR/main.qml.overview.patched"
+	cat >"$menu" <<'EOF'
+		// BEGIN venus-tpms-overview
+		ListElement {
+			pageSource: "OverviewTpms.qml"
+		}
+		// END venus-tpms-overview
+EOF
+
+	tiles_line=$(grep -n 'pageSource: "OverviewTiles.qml"' "$OVERVIEW_MAIN" | sed -n '1s/:.*//p')
+	[ -n "$tiles_line" ] || return 1
+	insert_line=$((tiles_line - 1))
+	[ "$insert_line" -gt 1 ] || return 1
+	sed -n "${insert_line}p" "$OVERVIEW_MAIN" | grep -q '^[[:space:]]*ListElement[[:space:]]*{$' || return 1
+	{
+		head -n $((insert_line - 1)) "$OVERVIEW_MAIN"
+		cat "$menu"
+		tail -n "+$insert_line" "$OVERVIEW_MAIN"
+	} >"$patched" || return 1
+	mv "$patched" "$OVERVIEW_MAIN"
 }
 
 write_service_run() {
@@ -460,6 +506,10 @@ if [ ! -f "$PAGE_MAIN" ]; then
 	say "${RED}ERROR: $PAGE_MAIN not found; no changes were made.${RESET}"
 	exit 1
 fi
+if [ ! -f "$OVERVIEW_MAIN" ]; then
+	say "${RED}ERROR: $OVERVIEW_MAIN not found; no changes were made.${RESET}"
+	exit 1
+fi
 if [ -e "$BOOT_HOOK" ] && [ ! -f "$BOOT_HOOK" ]; then
 	say "${RED}ERROR: $BOOT_HOOK is not a regular file; no changes were made.${RESET}"
 	exit 1
@@ -471,12 +521,13 @@ fi
 
 VERSION=$(current_version)
 PAGE_HASH=$(sha256 "$PAGE_MAIN")
+OVERVIEW_HASH=$(sha256 "$OVERVIEW_MAIN")
 ARCH=$(uname -m)
 if [ "$ARCH" != "armv7l" ]; then
 	say "${RED}ERROR: unsupported architecture $ARCH; this release supports the verified armv7 GX profile only.${RESET}"
 	exit 1
 fi
-if profile_is_supported "$VERSION" "$PAGE_HASH"; then
+if profile_is_supported "$VERSION" "$PAGE_HASH" && overview_profile_is_supported "$VERSION" "$OVERVIEW_HASH"; then
 	PROFILE="supported"
 	PROFILE_COLOR="$GREEN"
 else
@@ -487,6 +538,7 @@ fi
 say "Detected Venus OS: $VERSION"
 say "${PROFILE_COLOR}${BOLD}UI profile: $PROFILE${RESET}"
 say "PageMain.qml SHA256: $PAGE_HASH"
+say "main.qml SHA256: $OVERVIEW_HASH"
 say ""
 prompt "Start protected temporary trial? [y/N] "
 case "$REPLY" in
@@ -503,12 +555,14 @@ printf 'running\n' >"$TRIAL_STATE"
 cat /proc/sys/kernel/random/boot_id 2>/dev/null >"$TRIAL_DIR/boot-id" || printf unknown >"$TRIAL_DIR/boot-id"
 
 backup_target "$PAGE_MAIN" "PageMain.qml"
+backup_target "$OVERVIEW_MAIN" "main.qml"
 backup_target "$GUI_DIR/PageTpms.qml" "PageTpms.qml"
 backup_target "$GUI_DIR/PageTpmsBind.qml" "PageTpmsBind.qml"
 backup_target "$GUI_DIR/PageTpmsDiagnostics.qml" "PageTpmsDiagnostics.qml"
 backup_target "$GUI_DIR/PageTpmsDiscovered.qml" "PageTpmsDiscovered.qml"
 backup_target "$GUI_DIR/PageTpmsSensorDetails.qml" "PageTpmsSensorDetails.qml"
 backup_target "$GUI_DIR/PageTpmsWheel.qml" "PageTpmsWheel.qml"
+backup_target "$GUI_DIR/OverviewTpms.qml" "OverviewTpms.qml"
 [ -e "$SERVICE_LINK" ] && : >"$TRIAL_DIR/existing-service"
 
 write_trial_recovery
@@ -544,16 +598,18 @@ cp "$REPO_DIR/gui/qml/PageTpmsDiagnostics.qml" "$GUI_DIR/PageTpmsDiagnostics.qml
 cp "$REPO_DIR/gui/qml/PageTpmsDiscovered.qml" "$GUI_DIR/PageTpmsDiscovered.qml"
 cp "$REPO_DIR/gui/qml/PageTpmsSensorDetails.qml" "$GUI_DIR/PageTpmsSensorDetails.qml"
 cp "$REPO_DIR/gui/qml/PageTpmsWheel.qml" "$GUI_DIR/PageTpmsWheel.qml"
+cp "$REPO_DIR/gui/qml/OverviewTpms.qml" "$GUI_DIR/OverviewTpms.qml"
 chmod 0644 \
 	"$GUI_DIR/PageTpms.qml" \
 	"$GUI_DIR/PageTpmsBind.qml" \
 	"$GUI_DIR/PageTpmsDiagnostics.qml" \
 	"$GUI_DIR/PageTpmsDiscovered.qml" \
 	"$GUI_DIR/PageTpmsSensorDetails.qml" \
-	"$GUI_DIR/PageTpmsWheel.qml"
+	"$GUI_DIR/PageTpmsWheel.qml" \
+	"$GUI_DIR/OverviewTpms.qml"
 
-if ! patch_page_main; then
-	say "${RED}Unable to patch PageMain.qml. Restoring the original UI.${RESET}"
+if ! patch_tpms_menu || ! patch_tpms_overview; then
+	say "${RED}Unable to patch the GX UI. Restoring the original UI.${RESET}"
 	rollback_trial
 	trial_started=0
 	exit 1
