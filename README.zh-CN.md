@@ -5,6 +5,11 @@
 
 [English](README.md) | [详细操作说明](docs/USAGE.zh-CN.md)
 
+## 已验证环境
+
+已在 Color Control GX（`armv7`）的 Venus OS `v3.55` 上验证。其他版本尚未验证；
+安装器在任何版本上都会先进入受保护试验，再允许永久安装。
+
 ## 安装
 
 先按 [Victron 官方文档开启 SSH / root access](https://www.victronenergy.com/live/ccgx:root_access)，

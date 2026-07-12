@@ -7,6 +7,12 @@ pressure sensors and bind them to four wheel positions.
 
 [中文说明](README.zh-CN.md) | [Detailed guide](docs/USAGE.md)
 
+## Compatibility
+
+Verified on Venus OS `v3.55` running on a Color Control GX (`armv7`). Other
+versions are not yet verified; the installer always starts with a protected
+trial before any permanent change.
+
 ## Install
 
 Enable [SSH / root access](https://www.victronenergy.com/live/ccgx:root_access),
