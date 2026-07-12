@@ -46,16 +46,18 @@ TPMS 首页只保留四个轮位、`Discover sensors` 和 `Diagnostics`。首页
 
 ## 蓝牙状态
 
-TPMS 页面会显示 `Bluetooth`、`BLE receiver`、`BLE activity (5 min)` 和
-`Manufacturer data (5 min)`。
+TPMS 页面会显示 `Bluetooth`、`BLE receiver`、`BLE activity (60 sec)` 和
+`Manufacturer data (60 sec)`。
 
 - `Bluetooth` 正常时应为 `Scanning`。
+- 未插适配器时服务仍保持在线，并显示 `No Bluetooth adapter`。
 - 收到原始广播时，`BLE receiver` 应为 `Receiving`。
 - 两个活动数分别是近 5 分钟实际广播的不同 BLE 设备数，以及其中带 manufacturer data 的
   设备数。它们是诊断数据，不是已配置胎压数量。
 
 服务使用编号最小、可用的 BlueZ 适配器，不绑定特定 USB 型号或 `hci` 编号。拔出适配器后
-扫描暂停，重新插入可自动恢复。部分胎压传感器广播频率低，应先靠近设备并等待几分钟再判断。
+扫描暂停，重新插入后会在同一服务进程内自动恢复。部分胎压传感器广播频率低，应先靠近设备并
+等待几分钟再判断。
 
 ## 状态与调试
 
@@ -78,7 +80,7 @@ Scanning
 
 ```sh
 svc -d /service/venus-tpms-ble
-VENUS_TPMS_DEBUG=1 python3 /data/venus-tpms-ble/venus-tpms-ble.py
+/data/venus-tpms-ble/venus-tpms-ble
 ```
 
 按 `Ctrl-C` 停止后，再启动受管服务：
@@ -96,16 +98,11 @@ QML 页面并重载 GX 图形界面，不会修改其他启动命令。
 
 ## 开发
 
-服务通过 D-Bus 发布 `com.victronenergy.tpms.main`。开发时可直接运行：
+原生 Rust 服务通过 D-Bus 发布 `com.victronenergy.tpms.main`。构建 ARMv7 静态二进制：
 
 ```sh
-python3 service/venus-tpms-ble.py
-```
-
-模拟 UI 数据：
-
-```sh
-python3 tools/mock_tpms_dbus.py
+rustup target add armv7-unknown-linux-musleabihf
+sh scripts/build-armv7.sh
 ```
 
 协议解析归属 `tpms-ble-parser`；本仓库负责 Venus BLE 扫描、D-Bus 发布、UI 接入、轮位绑定、

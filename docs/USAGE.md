@@ -51,17 +51,18 @@ fresh advertisement is overdue.
 
 ## Bluetooth Status
 
-The TPMS page reports `Bluetooth`, `BLE receiver`, `BLE activity (5 min)`, and
-`Manufacturer data (5 min)`.
+The TPMS page reports `Bluetooth`, `BLE receiver`, `BLE activity (60 sec)`, and
+`Manufacturer data (60 sec)`.
 
 - `Bluetooth` should be `Scanning`.
+- Without an adapter it remains available and reports `No Bluetooth adapter`.
 - `BLE receiver` should be `Receiving` while raw advertisements arrive.
 - The two activity counts are recent distinct BLE devices and the subset with
   manufacturer data. They are diagnostics, not the number of configured tires.
 
 The service uses the lowest-numbered usable BlueZ adapter. It does not bind to a
 specific USB model or `hci` number. Removing an adapter pauses scanning; adding
-one back resumes it automatically. Some TPMS sensors advertise infrequently, so
+one back resumes it in the same service process. Some TPMS sensors advertise infrequently, so
 allow a few minutes and move the sensor closer before concluding that it is not
 being received.
 
@@ -86,7 +87,7 @@ For foreground debug output:
 
 ```sh
 svc -d /service/venus-tpms-ble
-VENUS_TPMS_DEBUG=1 python3 /data/venus-tpms-ble/venus-tpms-ble.py
+/data/venus-tpms-ble/venus-tpms-ble
 ```
 
 Stop it with `Ctrl-C`, then restart the managed service:
@@ -105,17 +106,12 @@ the GX UI. It does not alter unrelated startup commands.
 
 ## Development
 
-The service publishes `com.victronenergy.tpms.main` on D-Bus. Run it locally for
-development with:
+The native Rust service publishes `com.victronenergy.tpms.main` on D-Bus. Build
+the static ARMv7 binary with:
 
 ```sh
-python3 service/venus-tpms-ble.py
-```
-
-For mock UI data:
-
-```sh
-python3 tools/mock_tpms_dbus.py
+rustup target add armv7-unknown-linux-musleabihf
+sh scripts/build-armv7.sh
 ```
 
 Protocol parsing belongs in `tpms-ble-parser`; this repository owns Venus BLE

@@ -14,6 +14,9 @@ TRIAL_BOOT_MARKER_END="# END venus-tpms-ble-trial"
 GUI_DIR="/opt/victronenergy/gui/qml"
 PAGE_MAIN="$GUI_DIR/PageMain.qml"
 BACKUP_DIR="$APP_DIR/backups"
+BINARY_NAME="venus-tpms-ble-armv7-musl"
+BINARY_VERSION="v0.1.0"
+BINARY_URL="${VENUS_TPMS_BINARY_URL:-https://github.com/jkqq147/venus-tpms-ble/releases/download/$BINARY_VERSION/$BINARY_NAME}"
 
 TRIAL_DIR="/data/venus-tpms-ble-trial"
 TRIAL_RUNTIME_DIR="$TRIAL_DIR/runtime"
@@ -230,61 +233,56 @@ EOF
 }
 
 patch_page_main() {
-	PAGE_MAIN="$PAGE_MAIN" python3 - <<'PY'
-import os
-from pathlib import Path
+	grep -q 'PageTpms' "$PAGE_MAIN" 2>/dev/null && return 0
 
-path = Path(os.environ["PAGE_MAIN"])
-text = path.read_text()
-replacement = '''\t\t\tMbSubMenu {
-\t\t\t\tdescription: qsTr("TPMS")
-\t\t\t\titem: VBusItem { value: [] }
-\t\t\t\tMbTextBlock { item.bind: "com.victronenergy.tpms.main/Slots/front_left/DeviceListValue"; width: 62; height: 25 }
-\t\t\t\tMbTextBlock { item.bind: "com.victronenergy.tpms.main/Slots/front_right/DeviceListValue"; width: 62; height: 25 }
-\t\t\t\tMbTextBlock { item.bind: "com.victronenergy.tpms.main/Slots/rear_left/DeviceListValue"; width: 62; height: 25 }
-\t\t\t\tMbTextBlock { item.bind: "com.victronenergy.tpms.main/Slots/rear_right/DeviceListValue"; width: 62; height: 25 }
-\t\t\t\tsubpage: Component { PageTpms {} }
-\t\t\t}'''
+	menu="$TRIAL_DIR/PageTpms-menu.qml"
+	patched="$TRIAL_DIR/PageMain.qml.patched"
+	cat >"$menu" <<'EOF'
+			MbSubMenu {
+				description: qsTr("TPMS")
+				item: VBusItem { value: [] }
+				MbTextBlock { item.bind: "com.victronenergy.tpms.main/Slots/front_left/DeviceListValue"; width: 62; height: 25 }
+				MbTextBlock { item.bind: "com.victronenergy.tpms.main/Slots/front_right/DeviceListValue"; width: 62; height: 25 }
+				MbTextBlock { item.bind: "com.victronenergy.tpms.main/Slots/rear_left/DeviceListValue"; width: 62; height: 25 }
+				MbTextBlock { item.bind: "com.victronenergy.tpms.main/Slots/rear_right/DeviceListValue"; width: 62; height: 25 }
+				subpage: Component { PageTpms {} }
+			}
+EOF
 
-if "PageTpms" not in text:
-    marker = '\t\t\tMbSubMenu {\n\t\t\t\tdescription: qsTr("Settings")'
-    if marker not in text:
-        raise SystemExit("Could not find the supported Settings insertion point in PageMain.qml")
-    path.write_text(text.replace(marker, replacement + "\n\n" + marker, 1))
-    raise SystemExit(0)
-
-lines = text.splitlines()
-target = next((index for index, line in enumerate(lines) if 'description: qsTr("TPMS")' in line), None)
-if target is None:
-    raise SystemExit("PageTpms marker is present but the TPMS menu block is invalid")
-start = target
-while start >= 0 and "MbSubMenu {" not in lines[start]:
-    start -= 1
-if start < 0:
-    raise SystemExit("Could not locate the existing TPMS menu block")
-
-depth = 0
-end = None
-for index in range(start, len(lines)):
-    depth += lines[index].count("{")
-    depth -= lines[index].count("}")
-    if depth == 0:
-        end = index
-        break
-if end is None:
-    raise SystemExit("Existing TPMS menu block is incomplete")
-lines[start:end + 1] = replacement.splitlines()
-path.write_text("\n".join(lines) + "\n")
-PY
+	awk -v menu="$menu" '
+		{ lines[NR] = $0 }
+		END {
+			start = 0
+			for (i = 1; i <= NR; i++) {
+				if (lines[i] ~ /description: qsTr\("Settings"\)/) {
+					for (j = i; j >= 1; j--) {
+						if (lines[j] ~ /MbSubMenu[[:space:]]*\{/) { start = j; break }
+					}
+					break
+				}
+			}
+			if (!start) exit 2
+			for (i = 1; i <= NR; i++) {
+				if (i == start) {
+					while ((getline line < menu) > 0) print line
+					close(menu)
+					print ""
+				}
+				print lines[i]
+			}
+		}
+	' "$PAGE_MAIN" >"$patched" || return 1
+	mv "$patched" "$PAGE_MAIN"
 }
 
 write_service_run() {
 	target_dir="$1"
 	runtime="$2"
+	state_path="$3"
 	mkdir -p "$target_dir"
 	cat >"$target_dir/run" <<EOF
 #!/bin/sh
-exec python3 "$runtime/venus-tpms-ble.py" >/dev/null 2>&1
+VENUS_TPMS_STATE_PATH="$state_path" exec "$runtime/venus-tpms-ble" >/dev/null 2>&1
 EOF
 	chmod 0755 "$target_dir/run"
 }
@@ -397,10 +395,39 @@ remove_trial_boot_hook() {
 }
 
 stop_tpms_processes() {
-	ps w | awk '/venus_tpms_bluez_dbus.py|venus_tpms_mock_dbus.py|venus-tpms-ble.py/ && !/awk/ {print $1}' |
+	ps w | awk '/\/venus-tpms-ble([[:space:]]|$)/ && !/awk/ {print $1}' |
 	while read -r pid; do
 		[ -n "$pid" ] && [ "$pid" != "$$" ] && kill "$pid" 2>/dev/null || true
 	done
+}
+
+install_trial_binary() {
+	target="$TRIAL_RUNTIME_DIR/venus-tpms-ble"
+	if [ -n "${VENUS_TPMS_BINARY:-}" ]; then
+		if [ ! -f "$VENUS_TPMS_BINARY" ]; then
+			say "${RED}ERROR: VENUS_TPMS_BINARY does not exist: $VENUS_TPMS_BINARY${RESET}"
+			return 1
+		fi
+		cp "$VENUS_TPMS_BINARY" "$target"
+	else
+		say "Downloading native Rust service $BINARY_VERSION..."
+		if ! wget -q -O "$target" "$BINARY_URL"; then
+			say "${RED}ERROR: unable to download $BINARY_URL${RESET}"
+			return 1
+		fi
+		if ! wget -q -O "$target.sha256" "$BINARY_URL.sha256"; then
+			say "${RED}ERROR: unable to download binary checksum.${RESET}"
+			return 1
+		fi
+		expected=$(awk 'NR == 1 { print $1 }' "$target.sha256")
+		actual=$(sha256 "$target")
+		rm -f "$target.sha256"
+		if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+			say "${RED}ERROR: native service checksum mismatch.${RESET}"
+			return 1
+		fi
+	fi
+	chmod 0755 "$target"
 }
 
 rollback_trial() {
@@ -432,6 +459,11 @@ fi
 
 VERSION=$(current_version)
 PAGE_HASH=$(sha256 "$PAGE_MAIN")
+ARCH=$(uname -m)
+if [ "$ARCH" != "armv7l" ]; then
+	say "${RED}ERROR: unsupported architecture $ARCH; this release supports the verified armv7 GX profile only.${RESET}"
+	exit 1
+fi
 if profile_is_supported "$VERSION" "$PAGE_HASH"; then
 	PROFILE="supported"
 	PROFILE_COLOR="$GREEN"
@@ -479,9 +511,15 @@ if ! install_trial_boot_hook; then
 	exit 1
 fi
 
-cp "$REPO_DIR/service/venus-tpms-ble.py" "$TRIAL_RUNTIME_DIR/venus-tpms-ble.py"
-chmod 0755 "$TRIAL_RUNTIME_DIR/venus-tpms-ble.py"
-write_service_run "$TRIAL_SERVICE_DIR" "$TRIAL_RUNTIME_DIR"
+if ! install_trial_binary; then
+	rollback_trial
+	trial_started=0
+	exit 1
+fi
+if [ -f "$APP_DIR/state.json" ]; then
+	cp "$APP_DIR/state.json" "$TRIAL_DIR/tpms-state.json"
+fi
+write_service_run "$TRIAL_SERVICE_DIR" "$TRIAL_RUNTIME_DIR" "$TRIAL_DIR/tpms-state.json"
 
 if [ -e "$SERVICE_LINK" ]; then
 	svc -d "$SERVICE_LINK" 2>/dev/null || true
@@ -544,9 +582,12 @@ if [ "$REPLY" != "CONFIRM" ] || [ "$(cat "$TRIAL_STATE" 2>/dev/null || true)" !=
 fi
 
 mkdir -p "$APP_DIR" "$SERVICE_DIR" "$BACKUP_DIR"
-cp "$TRIAL_RUNTIME_DIR/venus-tpms-ble.py" "$APP_DIR/venus-tpms-ble.py"
-chmod 0755 "$APP_DIR/venus-tpms-ble.py"
-write_service_run "$SERVICE_DIR" "$APP_DIR"
+cp "$TRIAL_RUNTIME_DIR/venus-tpms-ble" "$APP_DIR/venus-tpms-ble"
+chmod 0755 "$APP_DIR/venus-tpms-ble"
+if [ -f "$TRIAL_DIR/tpms-state.json" ]; then
+	cp "$TRIAL_DIR/tpms-state.json" "$APP_DIR/state.json"
+fi
+write_service_run "$SERVICE_DIR" "$APP_DIR" "$APP_DIR/state.json"
 write_service_finish
 write_boot_start
 install_boot_hook
@@ -573,4 +614,5 @@ trial_started=0
 
 say "${GREEN}${BOLD}TPMS installed permanently.${RESET}"
 say "Service: $SERVICE_LINK"
-say "Logs: disabled by default; run manually with VENUS_TPMS_DEBUG=1 for debugging"
+say "Runtime: native Rust $BINARY_VERSION"
+say "Logs: disabled by default"

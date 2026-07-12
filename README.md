@@ -2,6 +2,8 @@
 
 BLE TPMS integration for Victron Venus OS / GX devices.
 
+The runtime is a static native Rust service.
+
 It adds a `TPMS` page to the GX device list, where you can discover BLE tire
 pressure sensors and bind them to four wheel positions.
 

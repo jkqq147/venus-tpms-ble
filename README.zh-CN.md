@@ -3,6 +3,8 @@
 在 Victron Venus OS / GX 设备上显示 BLE 胎压数据。安装后，GX 设备列表会出现
 `TPMS` 页面，可扫描传感器并绑定左前、右前、左后、右后四个轮位。
 
+运行时采用静态原生 Rust 服务。
+
 [English](README.md) | [详细操作说明](docs/USAGE.zh-CN.md)
 
 ## 已验证环境

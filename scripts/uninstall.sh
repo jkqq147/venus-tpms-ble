@@ -56,33 +56,34 @@ if [ -n "$latest_backup" ]; then
 	echo "Restored PageMain.qml from $latest_backup"
 else
 	if [ -f "$PAGE_MAIN" ] && grep -q 'PageTpms' "$PAGE_MAIN"; then
-		PAGE_MAIN="$PAGE_MAIN" python3 - <<'PY'
-import os
-from pathlib import Path
-
-path = Path(os.environ["PAGE_MAIN"])
-lines = path.read_text().splitlines()
-target = next((index for index, line in enumerate(lines) if 'description: qsTr("TPMS")' in line), None)
-if target is not None:
-    start = target
-    while start >= 0 and "MbSubMenu {" not in lines[start]:
-        start -= 1
-    if start >= 0:
-        depth = 0
-        end = None
-        for index in range(start, len(lines)):
-            depth += lines[index].count("{")
-            depth -= lines[index].count("}")
-            if depth == 0:
-                end = index
-                break
-        if end is not None:
-            del lines[start:end + 1]
-            if start < len(lines) and not lines[start].strip():
-                del lines[start]
-path.write_text("\n".join(lines) + "\n")
-PY
-		fi
+		patched="$APP_DIR/PageMain.qml.uninstall.$$"
+		awk '
+			{ lines[NR] = $0 }
+			END {
+				target = 0
+				for (i = 1; i <= NR; i++) {
+					if (lines[i] ~ /description: qsTr\("TPMS"\)/) { target = i; break }
+				}
+				start = 0
+				for (i = target; i >= 1; i--) {
+					if (lines[i] ~ /MbSubMenu[[:space:]]*\{/) { start = i; break }
+				}
+				end = 0
+				depth = 0
+				for (i = start; start && i <= NR; i++) {
+					line = lines[i]
+					opens = gsub(/\{/, "{", line)
+					closes = gsub(/\}/, "}", line)
+					depth += opens - closes
+					if (depth == 0) { end = i; break }
+				}
+				for (i = 1; i <= NR; i++) {
+					if (!start || !end || i < start || i > end) print lines[i]
+				}
+			}
+		' "$PAGE_MAIN" >"$patched"
+		mv "$patched" "$PAGE_MAIN"
+	fi
 fi
 
 rm -f \
@@ -96,5 +97,7 @@ rm -f \
 if command -v svc >/dev/null 2>&1; then
 	svc -t /service/gui 2>/dev/null || true
 fi
+
+rm -rf "$APP_DIR"
 
 echo "Uninstalled $SERVICE_NAME"
