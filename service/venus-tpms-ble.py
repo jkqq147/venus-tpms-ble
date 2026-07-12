@@ -7,9 +7,12 @@ import errno
 import fcntl
 import json
 import os
+import queue
+import select
 import signal
 import struct
 import sys
+import threading
 import time
 
 import dbus
@@ -38,6 +41,9 @@ UNASSIGNED = "unassigned"
 DISCOVERED_LIMIT = 10
 LAST_READING_PERSIST_INTERVAL_SECONDS = 60
 BLE_ACTIVITY_WINDOW_SECONDS = 300
+HCI_DRAIN_INTERVAL_MS = 100
+HCI_EVENTS_PER_DRAIN = 8
+HCI_EVENT_QUEUE_SIZE = 128
 
 AF_BLUETOOTH = 31
 SOCK_RAW = 3
@@ -157,8 +163,14 @@ class TpmsBluezService:
         self.adapter = None
         self.adapter_properties = None
         self.discovery_started = False
+        self.discovery_owned = False
         self.hci_fd = None
         self.hci_watch = None
+        self.hci_thread = None
+        self.hci_stop = threading.Event()
+        self.hci_events = queue.Queue(maxsize=HCI_EVENT_QUEUE_SIZE)
+        self.hci_activity = {}
+        self.hci_activity_lock = threading.Lock()
         self.ble_devices_by_address = {}
         self.readings_by_sensor_id = {}
         self.discovered_order = []
@@ -345,12 +357,13 @@ class TpmsBluezService:
             return False
 
     def _detach_adapter(self):
-        if self.discovery_started and self.adapter is not None:
+        if self.discovery_owned and self.adapter is not None:
             try:
                 self.adapter.StopDiscovery()
             except Exception:
                 pass
         self.discovery_started = False
+        self.discovery_owned = False
         self._close_hci_listener()
         self.adapter_path = None
         self.adapter = None
@@ -412,11 +425,10 @@ class TpmsBluezService:
             flags = fcntl.fcntl(fd, fcntl.F_GETFL)
             fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
             self.hci_fd = fd
-            self.hci_watch = GLib.io_add_watch(
-                fd,
-                GLib.IO_IN | GLib.IO_ERR | GLib.IO_HUP,
-                self._hci_data_available,
-            )
+            self.hci_stop.clear()
+            self.hci_thread = threading.Thread(target=self._read_hci, args=(fd,), daemon=True)
+            self.hci_thread.start()
+            self.hci_watch = GLib.timeout_add(HCI_DRAIN_INTERVAL_MS, self._drain_hci_events)
             self._set_receiver_status("Listening")
             debug(f"Listening for raw HCI advertisements on {adapter_name}")
         except Exception as exc:
@@ -430,26 +442,68 @@ class TpmsBluezService:
             self._set_receiver_status("Unavailable")
             debug(f"Raw HCI listener unavailable, using BlueZ Device1 data: {exc}")
 
-    def _hci_data_available(self, _source, condition):
-        if condition & (GLib.IO_ERR | GLib.IO_HUP):
-            debug("Raw HCI listener closed")
-            self._close_hci_listener(remove_watch=False)
-            return False
-        while True:
+    def _read_hci(self, fd):
+        while not self.hci_stop.is_set():
+            if self.hci_fd != fd:
+                return
             try:
-                packet = os.read(self.hci_fd, 2048)
+                readable, _, _ = select.select([fd], [], [], 1)
+            except (OSError, ValueError):
+                return
+            if not readable:
+                continue
+            try:
+                packet = os.read(fd, 2048)
             except OSError as exc:
                 if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
-                    break
+                    continue
                 debug(f"Raw HCI read failed: {exc}")
-                self._close_hci_listener(remove_watch=False)
-                return False
+                return
             if not packet:
-                self._close_hci_listener(remove_watch=False)
-                return False
+                return
+            self._queue_hci_reports(packet)
+
+    def _queue_hci_reports(self, packet):
+        now = int(time.time())
+        for report in parse_hci_le_advertising_reports(packet):
+            name, manufacturer_data = parse_advertisement_data(report["data"])
+            with self.hci_activity_lock:
+                existing = self.hci_activity.get(report["address"], {})
+                self.hci_activity[report["address"]] = {
+                    "last_seen": now,
+                    "name": name or existing.get("name", ""),
+                    "rssi": report["rssi"] if report["rssi"] is not None else existing.get("rssi"),
+                    "has_manufacturer_data": bool(manufacturer_data or existing.get("has_manufacturer_data")),
+                }
+            for data in manufacturer_data:
+                if parse_tpms_manufacturer_data(data) is None:
+                    continue
+                try:
+                    self.hci_events.put_nowait((report["address"], name, report["rssi"], data))
+                except queue.Full:
+                    pass
+
+    def _drain_hci_events(self):
+        if self.hci_fd is None:
+            return False
+        now = int(time.time())
+        cutoff = now - BLE_ACTIVITY_WINDOW_SECONDS
+        with self.hci_activity_lock:
+            self.ble_devices_by_address = {
+                address: activity
+                for address, activity in self.hci_activity.items()
+                if activity["last_seen"] >= cutoff
+            }
+            self.hci_activity = dict(self.ble_devices_by_address)
+        self._update_bluetooth_counts({})
+        for _ in range(HCI_EVENTS_PER_DRAIN):
+            try:
+                address, name, rssi, data = self.hci_events.get_nowait()
+            except queue.Empty:
+                break
             self._set_receiver_status("Receiving")
-            self._handle_hci_packet(packet)
-        return True
+            self._handle_manufacturer_data(address, name, rssi, data)
+        return self.hci_fd is not None
 
     def _ensure_hci_listener(self):
         if self.adapter is None or self.hci_fd is not None:
@@ -465,12 +519,19 @@ class TpmsBluezService:
         if self.hci_watch is not None and remove_watch:
             GLib.source_remove(self.hci_watch)
         self.hci_watch = None
+        self.hci_stop.set()
         if self.hci_fd is not None:
             try:
                 os.close(self.hci_fd)
             except OSError:
                 pass
             self.hci_fd = None
+        if self.hci_thread is not None and self.hci_thread is not threading.current_thread():
+            self.hci_thread.join(timeout=1)
+        self.hci_thread = None
+        self.hci_events = queue.Queue(maxsize=HCI_EVENT_QUEUE_SIZE)
+        with self.hci_activity_lock:
+            self.hci_activity = {}
         self._set_receiver_status("Unavailable")
 
     def _handle_hci_packet(self, packet):
@@ -486,8 +547,13 @@ class TpmsBluezService:
                 self._handle_manufacturer_data(report["address"], name, report["rssi"], data)
 
     def _start_discovery(self):
-        self.adapter.SetDiscoveryFilter({"Transport": dbus.String("le"), "DuplicateData": dbus.Boolean(True)})
-        self.adapter.StartDiscovery()
+        discovering = bool(self.adapter_properties.Get("org.bluez.Adapter1", "Discovering"))
+        if discovering:
+            self.discovery_owned = False
+        else:
+            self.adapter.SetDiscoveryFilter({"Transport": dbus.String("le"), "DuplicateData": dbus.Boolean(True)})
+            self.adapter.StartDiscovery()
+            self.discovery_owned = True
         self.discovery_started = True
         self.service["/Status"] = 0
         self.service["/StatusText"] = "Scanning"
@@ -916,7 +982,10 @@ class TpmsBluezService:
             self.service[f"{self._discovered_root(index)}/AssignedWheel"] = self._assigned_wheel_for_sensor(sensor_id)
 
     def tick(self):
-        self._ensure_discovery()
+        if self.adapter is None or not self.discovery_started:
+            self._ensure_discovery()
+        elif self.hci_fd is not None:
+            self._update_bluetooth_counts({})
         self._ensure_hci_listener()
         self._prune_expired_readings()
         self._update_slots()

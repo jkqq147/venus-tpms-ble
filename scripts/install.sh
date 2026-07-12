@@ -332,35 +332,57 @@ EOF
 }
 
 install_boot_hook() {
+	filtered="$APP_DIR/rc.local.$$.filtered"
 	tmp="$APP_DIR/rc.local.$$"
 	if [ -f "$BOOT_HOOK" ]; then
-		sed "/^$BOOT_MARKER_BEGIN\$/,/^$BOOT_MARKER_END\$/d" "$BOOT_HOOK" >"$tmp"
+		sed "/^$BOOT_MARKER_BEGIN\$/,/^$BOOT_MARKER_END\$/d" "$BOOT_HOOK" >"$filtered"
 	else
-		printf '%s\n' '#!/bin/sh' >"$tmp"
+		printf '%s\n' '#!/bin/sh' >"$filtered"
+	fi
+	if [ "$(sed -n '1p' "$filtered")" = '#!/bin/sh' ]; then
+		sed -n '1p' "$filtered" >"$tmp"
+	else
+		: >"$tmp"
 	fi
 	cat >>"$tmp" <<EOF
-
 $BOOT_MARKER_BEGIN
 "$BOOT_START" >/dev/null 2>&1 &
 $BOOT_MARKER_END
 EOF
+	if [ "$(sed -n '1p' "$filtered")" = '#!/bin/sh' ]; then
+		sed -n '2,$p' "$filtered" >>"$tmp"
+	else
+		cat "$filtered" >>"$tmp"
+	fi
+	rm -f "$filtered"
 	mv "$tmp" "$BOOT_HOOK"
 	chmod 0755 "$BOOT_HOOK"
 }
 
 install_trial_boot_hook() {
+	filtered="$TRIAL_DIR/rc.local.$$.filtered"
 	tmp="$TRIAL_DIR/rc.local.$$"
 	if [ -f "$BOOT_HOOK" ]; then
-		sed "/^$TRIAL_BOOT_MARKER_BEGIN\$/,/^$TRIAL_BOOT_MARKER_END\$/d" "$BOOT_HOOK" >"$tmp"
+		sed "/^$TRIAL_BOOT_MARKER_BEGIN\$/,/^$TRIAL_BOOT_MARKER_END\$/d" "$BOOT_HOOK" >"$filtered"
 	else
-		printf '%s\n' '#!/bin/sh' >"$tmp"
+		printf '%s\n' '#!/bin/sh' >"$filtered"
+	fi
+	if [ "$(sed -n '1p' "$filtered")" = '#!/bin/sh' ]; then
+		sed -n '1p' "$filtered" >"$tmp"
+	else
+		: >"$tmp"
 	fi
 	cat >>"$tmp" <<EOF
-
 $TRIAL_BOOT_MARKER_BEGIN
 (sh "$TRIAL_DIR/recover.sh"; rm -rf "$TRIAL_DIR") >/dev/null 2>&1 &
 $TRIAL_BOOT_MARKER_END
 EOF
+	if [ "$(sed -n '1p' "$filtered")" = '#!/bin/sh' ]; then
+		sed -n '2,$p' "$filtered" >>"$tmp"
+	else
+		cat "$filtered" >>"$tmp"
+	fi
+	rm -f "$filtered"
 	mv "$tmp" "$BOOT_HOOK"
 	chmod 0755 "$BOOT_HOOK"
 }
