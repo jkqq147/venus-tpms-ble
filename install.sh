@@ -2,7 +2,7 @@
 set -eu
 
 BRANCH="${VENUS_TPMS_BRANCH:-master}"
-BASE_URL="https://github.com/jkqq147/venus-tpms-ble/archive/refs/heads/$BRANCH.zip"
+BASE_URL="https://codeload.github.com/jkqq147/venus-tpms-ble/zip/refs/heads/$BRANCH"
 WORK_DIR="/tmp/venus-tpms-ble-install.$$"
 ZIP_FILE="/tmp/venus-tpms-ble.$$.zip"
 
