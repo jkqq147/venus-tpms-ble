@@ -813,7 +813,8 @@ class TpmsBluezService:
         self.service[f"{root}/StateText"] = state_text
         self.service[f"{root}/Summary"] = self._slot_summary(reading, state_text)
         self.service[f"{root}/DeviceListValue"] = self._device_list_value(reading, state)
-        self.service[f"{root}/PressureDisplay"] = f"{reading['pressure_bar']:.2f}"
+        suffix = "*" if state == "stale" else ""
+        self.service[f"{root}/PressureDisplay"] = f"{reading['pressure_bar']:.2f}{suffix}"
         self.service[f"{root}/TemperatureDisplay"] = f"{reading['temperature_c']:.1f}C"
 
     def _clear_slot(self, root, wheel_label, state_text, state):
@@ -828,7 +829,7 @@ class TpmsBluezService:
         self.service[f"{root}/StateText"] = state_text
         self.service[f"{root}/Summary"] = state_text
         self.service[f"{root}/DeviceListValue"] = "wait" if state == "waiting" else "--"
-        self.service[f"{root}/PressureDisplay"] = "--"
+        self.service[f"{root}/PressureDisplay"] = "wait" if state == "waiting" else "--"
         self.service[f"{root}/TemperatureDisplay"] = "--"
 
     @staticmethod

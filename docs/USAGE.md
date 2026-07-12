@@ -29,6 +29,11 @@ install command after every update to restore the TPMS menu.
 `Discovered` shows recently received, unbound TPMS sensors. Open a sensor and
 choose one of `Front left`, `Front right`, `Rear left`, or `Rear right`.
 
+The TPMS home page is deliberately limited to four wheel rows, `Discover
+sensors`, and `Diagnostics`. The home page shows pressure and temperature only;
+sensor metadata and BLE scanner diagnostics are available in their respective
+subpages.
+
 The device list shows wheels in this order:
 
 ```text

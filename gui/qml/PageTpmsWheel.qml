@@ -11,16 +11,6 @@ MbPage {
 
 	model: VisibleItemModel {
 		MbItemValue {
-			description: qsTr("Status")
-			item.bind: root.slotPrefix + "/StateText"
-		}
-
-		MbItemValue {
-			description: qsTr("Sensor ID")
-			item.bind: root.slotPrefix + "/SensorId"
-		}
-
-		MbItemValue {
 			description: qsTr("Pressure")
 			item {
 				bind: root.slotPrefix + "/Pressure"
@@ -39,24 +29,14 @@ MbPage {
 		}
 
 		MbItemValue {
-			description: qsTr("Battery")
-			item {
-				bind: root.slotPrefix + "/Battery"
-				unit: "%"
-			}
+			description: qsTr("Status")
+			item.bind: root.slotPrefix + "/StateText"
 		}
 
-		MbItemValue {
-			description: qsTr("RSSI")
-			item {
-				bind: root.slotPrefix + "/Rssi"
-				unit: "dBm"
-			}
-		}
-
-		MbItemValue {
-			description: qsTr("Last seen")
-			item.bind: root.slotPrefix + "/LastSeen"
+		MbSubMenu {
+			description: qsTr("Sensor details")
+			item: VBusItem { value: [] }
+			subpage: Component { PageTpmsSensorDetails { slotPrefix: root.slotPrefix } }
 		}
 	}
 }

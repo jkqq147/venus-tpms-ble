@@ -157,6 +157,9 @@ rm -f "$TRIAL_SERVICE_LINK" "$TRIAL_GUARD_LINK"
 restore_target "$PAGE_MAIN" "PageMain.qml"
 restore_target "$GUI_DIR/PageTpms.qml" "PageTpms.qml"
 restore_target "$GUI_DIR/PageTpmsBind.qml" "PageTpmsBind.qml"
+restore_target "$GUI_DIR/PageTpmsDiagnostics.qml" "PageTpmsDiagnostics.qml"
+restore_target "$GUI_DIR/PageTpmsDiscovered.qml" "PageTpmsDiscovered.qml"
+restore_target "$GUI_DIR/PageTpmsSensorDetails.qml" "PageTpmsSensorDetails.qml"
 restore_target "$GUI_DIR/PageTpmsWheel.qml" "PageTpmsWheel.qml"
 
 if command -v svc >/dev/null 2>&1; then
@@ -436,6 +439,9 @@ cat /proc/sys/kernel/random/boot_id 2>/dev/null >"$TRIAL_DIR/boot-id" || printf 
 backup_target "$PAGE_MAIN" "PageMain.qml"
 backup_target "$GUI_DIR/PageTpms.qml" "PageTpms.qml"
 backup_target "$GUI_DIR/PageTpmsBind.qml" "PageTpmsBind.qml"
+backup_target "$GUI_DIR/PageTpmsDiagnostics.qml" "PageTpmsDiagnostics.qml"
+backup_target "$GUI_DIR/PageTpmsDiscovered.qml" "PageTpmsDiscovered.qml"
+backup_target "$GUI_DIR/PageTpmsSensorDetails.qml" "PageTpmsSensorDetails.qml"
 backup_target "$GUI_DIR/PageTpmsWheel.qml" "PageTpmsWheel.qml"
 [ -e "$SERVICE_LINK" ] && : >"$TRIAL_DIR/existing-service"
 
@@ -462,8 +468,17 @@ stop_tpms_processes
 
 cp "$REPO_DIR/gui/qml/PageTpms.qml" "$GUI_DIR/PageTpms.qml"
 cp "$REPO_DIR/gui/qml/PageTpmsBind.qml" "$GUI_DIR/PageTpmsBind.qml"
+cp "$REPO_DIR/gui/qml/PageTpmsDiagnostics.qml" "$GUI_DIR/PageTpmsDiagnostics.qml"
+cp "$REPO_DIR/gui/qml/PageTpmsDiscovered.qml" "$GUI_DIR/PageTpmsDiscovered.qml"
+cp "$REPO_DIR/gui/qml/PageTpmsSensorDetails.qml" "$GUI_DIR/PageTpmsSensorDetails.qml"
 cp "$REPO_DIR/gui/qml/PageTpmsWheel.qml" "$GUI_DIR/PageTpmsWheel.qml"
-chmod 0644 "$GUI_DIR/PageTpms.qml" "$GUI_DIR/PageTpmsBind.qml" "$GUI_DIR/PageTpmsWheel.qml"
+chmod 0644 \
+	"$GUI_DIR/PageTpms.qml" \
+	"$GUI_DIR/PageTpmsBind.qml" \
+	"$GUI_DIR/PageTpmsDiagnostics.qml" \
+	"$GUI_DIR/PageTpmsDiscovered.qml" \
+	"$GUI_DIR/PageTpmsSensorDetails.qml" \
+	"$GUI_DIR/PageTpmsWheel.qml"
 
 if ! patch_page_main; then
 	say "${RED}Unable to patch PageMain.qml. Restoring the original UI.${RESET}"

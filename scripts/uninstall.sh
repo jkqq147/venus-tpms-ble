@@ -85,7 +85,13 @@ PY
 		fi
 fi
 
-rm -f "$GUI_DIR/PageTpms.qml" "$GUI_DIR/PageTpmsBind.qml" "$GUI_DIR/PageTpmsWheel.qml"
+rm -f \
+	"$GUI_DIR/PageTpms.qml" \
+	"$GUI_DIR/PageTpmsBind.qml" \
+	"$GUI_DIR/PageTpmsDiagnostics.qml" \
+	"$GUI_DIR/PageTpmsDiscovered.qml" \
+	"$GUI_DIR/PageTpmsSensorDetails.qml" \
+	"$GUI_DIR/PageTpmsWheel.qml"
 
 if command -v svc >/dev/null 2>&1; then
 	svc -t /service/gui 2>/dev/null || true

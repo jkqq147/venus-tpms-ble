@@ -27,6 +27,9 @@
 `Discovered` 显示近期收到、尚未绑定的胎压传感器。打开传感器后选择 `Front left`、
 `Front right`、`Rear left` 或 `Rear right`。
 
+TPMS 首页只保留四个轮位、`Discover sensors` 和 `Diagnostics`。首页仅显示胎压和温度；
+传感器元数据与 BLE 扫描诊断分别放在对应的二级页面。
+
 设备列表的轮位顺序为：
 
 ```text
