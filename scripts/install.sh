@@ -258,7 +258,7 @@ EOF
 		END {
 			start = 0
 			for (i = 1; i <= NR; i++) {
-				if (lines[i] ~ /description: qsTr\("Settings"\)/) {
+				if (lines[i] ~ /description: qsTr\("Notifications"\)/) {
 					for (j = i; j >= 1; j--) {
 						if (lines[j] ~ /MbSubMenu[[:space:]]*\{/) { start = j; break }
 					}
