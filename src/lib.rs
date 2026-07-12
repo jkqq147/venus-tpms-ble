@@ -1,3 +1,5 @@
+//! Native BLE scanning, state management, and Venus D-Bus publishing.
+
 #[cfg(target_os = "linux")]
 mod bluez;
 #[cfg(target_os = "linux")]
@@ -12,7 +14,7 @@ mod state;
 mod venus;
 
 #[cfg(target_os = "linux")]
-fn main() -> Result<(), Box<dyn std::error::Error>> {
+pub fn run_service() -> Result<(), Box<dyn std::error::Error>> {
     use std::{
         env, io,
         sync::mpsc,
@@ -107,6 +109,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[cfg(target_os = "linux")]
+pub fn run_hci_monitor() -> std::io::Result<()> {
+    linux::run()
+}
+
+#[cfg(target_os = "linux")]
 fn spawn_scanner(adapter_index: u16, events_tx: std::sync::mpsc::Sender<event::Event>) {
     use std::thread;
 
@@ -145,10 +152,4 @@ fn spawn_scanner(adapter_index: u16, events_tx: std::sync::mpsc::Sender<event::E
             let _ = events_tx.send(Event::ScannerFailed(error.to_string()));
         }
     });
-}
-
-#[cfg(not(target_os = "linux"))]
-fn main() {
-    eprintln!("venus-tpms-ble only runs on Linux");
-    std::process::exit(2);
 }

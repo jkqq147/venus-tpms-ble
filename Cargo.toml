@@ -8,14 +8,6 @@ description = "Native Venus OS HCI receiver for BLE TPMS advertisements"
 [features]
 hci-test = []
 
-[[bin]]
-name = "venus-tpms-hci-monitor"
-path = "native/main.rs"
-
-[[bin]]
-name = "venus-tpms-ble"
-path = "native/native_service.rs"
-
 [dependencies]
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }

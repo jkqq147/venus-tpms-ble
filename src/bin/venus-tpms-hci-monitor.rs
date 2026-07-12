@@ -4,12 +4,9 @@
 //! the resulting HCI advertising reports, discards non-TPMS payloads, and emits
 //! parsed readings as JSON lines.
 
-#[cfg(any(target_os = "linux", feature = "hci-test"))]
-mod linux;
-
 #[cfg(target_os = "linux")]
 fn main() {
-    if let Err(error) = linux::run() {
+    if let Err(error) = venus_tpms_ble::run_hci_monitor() {
         eprintln!("{error}");
         std::process::exit(1);
     }
