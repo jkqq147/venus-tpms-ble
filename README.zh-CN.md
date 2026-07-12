@@ -5,6 +5,10 @@
 
 运行时采用静态原生 Rust 服务。
 
+## Dashboard
+
+![GX 设备上的 TPMS Dashboard](docs/images/dashboard.png)
+
 [English](README.md) | [详细操作说明](docs/USAGE.zh-CN.md)
 
 ## 已验证环境

@@ -7,6 +7,10 @@ The runtime is a static native Rust service.
 It adds a `TPMS` page to the GX device list, where you can discover BLE tire
 pressure sensors and bind them to four wheel positions.
 
+## Dashboard
+
+![TPMS dashboard on a GX device](docs/images/dashboard.png)
+
 [中文说明](README.zh-CN.md) | [Detailed guide](docs/USAGE.md)
 
 ## Compatibility
