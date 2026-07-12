@@ -11,7 +11,7 @@ jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - run: rustup target add armv7-unknown-linux-musleabihf
       - run: sh scripts/build-armv7.sh
       - name: Prepare assets
