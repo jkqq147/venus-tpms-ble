@@ -9,11 +9,11 @@ pressure sensors and bind them to four wheel positions.
 
 ## Dashboard
 
-![TPMS dashboard on a GX device](docs/images/dashboard.png)
+<img src="docs/images/dashboard.png" width="480" alt="TPMS dashboard on a GX device">
 
 ## TPMS Page
 
-![TPMS wheel, sensor discovery, and diagnostics page](docs/images/tpms-page.png)
+<img src="docs/images/tpms-page.png" width="480" alt="TPMS wheel, sensor discovery, and diagnostics page">
 
 [中文说明](README.zh-CN.md) | [Detailed guide](docs/USAGE.md)
 

@@ -7,11 +7,11 @@
 
 ## Dashboard
 
-![GX 设备上的 TPMS Dashboard](docs/images/dashboard.png)
+<img src="docs/images/dashboard.png" width="480" alt="GX 设备上的 TPMS Dashboard">
 
 ## TPMS 页面
 
-![TPMS 轮位、传感器扫描与诊断页面](docs/images/tpms-page.png)
+<img src="docs/images/tpms-page.png" width="480" alt="TPMS 轮位、传感器扫描与诊断页面">
 
 [English](README.md) | [详细操作说明](docs/USAGE.zh-CN.md)
 
