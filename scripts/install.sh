@@ -30,6 +30,7 @@ TTY="/dev/tty"
 
 SCRIPT_DIR=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 REPO_DIR=$(CDPATH='' cd -- "$SCRIPT_DIR/.." && pwd)
+BUNDLED_BINARY="$REPO_DIR/dist/$BINARY_NAME"
 
 # This table intentionally fails closed. Add a profile only after real GX testing.
 SUPPORTED_PROFILE_V355="2b231c72b3a178e2110171c8cfdc693ead829eafc47c19dcaba9a6746a3b3943"
@@ -409,6 +410,14 @@ install_trial_binary() {
 			return 1
 		fi
 		cp "$VENUS_TPMS_BINARY" "$target"
+	elif [ -f "$BUNDLED_BINARY" ] && [ -f "$BUNDLED_BINARY.sha256" ]; then
+		expected=$(awk 'NR == 1 { print $1 }' "$BUNDLED_BINARY.sha256")
+		actual=$(sha256 "$BUNDLED_BINARY")
+		if [ -z "$expected" ] || [ "$actual" != "$expected" ]; then
+			say "${RED}ERROR: bundled native service checksum mismatch.${RESET}"
+			return 1
+		fi
+		cp "$BUNDLED_BINARY" "$target"
 	else
 		say "Downloading native Rust service $BINARY_VERSION..."
 		if ! wget -q -O "$target" "$BINARY_URL"; then

@@ -14,4 +14,5 @@ jobs:
       - run: cargo test --features hci-test
       - run: cargo clippy --all-targets --features hci-test -- -D warnings
       - run: sh scripts/build-armv7.sh
+      - run: cd dist && sha256sum -c venus-tpms-ble-armv7-musl.sha256
       - run: sh -n install.sh uninstall.sh scripts/*.sh
