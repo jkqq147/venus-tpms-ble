@@ -41,6 +41,16 @@ and restarts the GX UI so the new menu is loaded. It does not reboot the whole
 GX device. Runtime files are copied to `/data/venus-tpms-ble`; temporary
 download files are cleaned automatically.
 
+Venus OS updates are supported. Because the GX UI files can be replaced by an
+OS update, run the same install command once after an update to restore the
+`TPMS` menu and its UI integration.
+
+The service does not bind to a specific adapter model or `hci` number. It uses
+the lowest-numbered BlueZ adapter that can scan BLE. You can insert or remove a
+USB adapter while it is running: scanning pauses while no adapter is present and
+automatically resumes when an adapter reappears. Bound wheels retain their last
+known readings during that interruption.
+
 ## First Setup
 
 1. Open the local GX screen.
@@ -56,6 +66,10 @@ download files are cleaned automatically.
 
 The discovered list shows pressure, temperature, and RSSI, which helps identify
 which sensor is closest or currently active.
+
+Unbound sensors are temporary: they disappear from the discovered list after
+five minutes without a new advertisement. Bound wheels retain their last-known
+reading and are shown as `Stale` when the sensor stops advertising.
 
 ## Display
 
@@ -75,8 +89,13 @@ Values mean:
 Inside the `TPMS` page, each wheel shows pressure, temperature, and state. Open a
 wheel to see details such as sensor ID, battery, RSSI, and last seen time.
 
-The same page also shows Bluetooth status and BLE device counts. If `Bluetooth`
-is not `Scanning`, the adapter or BlueZ discovery needs attention.
+The same page also shows Bluetooth status and recent BLE activity. `BLE activity
+(5 min)` is the number of different BLE devices that advertised during the last
+five minutes. `Manufacturer data (5 min)` is the subset that included a
+manufacturer-data field. Both values are diagnostic indicators only. If
+`Bluetooth` is not `Scanning`, the adapter or BlueZ discovery needs attention.
+`BLE receiver` should be `Receiving` while raw advertisements are arriving; the
+service automatically recreates that receiver if it closes.
 
 ## Check Status
 

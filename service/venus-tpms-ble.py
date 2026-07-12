@@ -2,9 +2,13 @@
 """Scan TPMS BLE advertisements through BlueZ and publish them on Venus D-Bus."""
 
 import argparse
+import ctypes
+import errno
+import fcntl
 import json
 import os
 import signal
+import struct
 import sys
 import time
 
@@ -33,6 +37,16 @@ SETTINGS_PREFIX = "/Settings/Tpms"
 UNASSIGNED = "unassigned"
 DISCOVERED_LIMIT = 10
 LAST_READING_PERSIST_INTERVAL_SECONDS = 60
+BLE_ACTIVITY_WINDOW_SECONDS = 300
+
+AF_BLUETOOTH = 31
+SOCK_RAW = 3
+BTPROTO_HCI = 1
+SOL_HCI = 0
+HCI_FILTER = 2
+HCI_EVENT_PKT = 0x04
+EVT_LE_META_EVENT = 0x3E
+EVT_LE_ADVERTISING_REPORT = 0x02
 
 WHEELS = (
     ("front_left", "FrontLeft", "Front left"),
@@ -69,6 +83,71 @@ def parse_tpms_manufacturer_data(data):
     }
 
 
+def parse_advertisement_data(data):
+    name = ""
+    manufacturer_data = []
+    offset = 0
+    while offset < len(data):
+        length = data[offset]
+        offset += 1
+        if length == 0:
+            break
+        end = offset + length
+        if end > len(data):
+            break
+        ad_type = data[offset]
+        value = data[offset + 1:end]
+        if ad_type in (0x08, 0x09):
+            name = value.decode("utf-8", errors="replace")
+        elif ad_type == 0xFF:
+            manufacturer_data.append(value)
+        offset = end
+    return name, manufacturer_data
+
+
+def parse_hci_le_advertising_reports(packet):
+    if packet and packet[0] == HCI_EVENT_PKT:
+        packet = packet[1:]
+    if len(packet) < 4 or packet[0] != EVT_LE_META_EVENT:
+        return []
+
+    parameter_length = packet[1]
+    parameters = packet[2:2 + parameter_length]
+    if len(parameters) < 2 or parameters[0] != EVT_LE_ADVERTISING_REPORT:
+        return []
+
+    reports = []
+    offset = 2
+    for _ in range(parameters[1]):
+        if offset + 9 > len(parameters):
+            break
+        event_type = parameters[offset]
+        address_type = parameters[offset + 1]
+        address = ":".join(f"{byte:02X}" for byte in reversed(parameters[offset + 2:offset + 8]))
+        data_length = parameters[offset + 8]
+        data_start = offset + 9
+        data_end = data_start + data_length
+        if data_end >= len(parameters):
+            break
+        reports.append({
+            "event_type": event_type,
+            "address_type": address_type,
+            "address": address,
+            "data": parameters[data_start:data_end],
+            "rssi": int.from_bytes(parameters[data_end:data_end + 1], "little", signed=True),
+        })
+        offset = data_end + 1
+    return reports
+
+
+class SockaddrHci(ctypes.Structure):
+    _fields_ = (
+        ("hci_family", ctypes.c_ushort),
+        ("hci_dev", ctypes.c_ushort),
+        ("hci_channel", ctypes.c_ushort),
+    )
+
+
 class TpmsBluezService:
     def __init__(self, stale_seconds):
         self.stale_seconds = stale_seconds
@@ -78,6 +157,9 @@ class TpmsBluezService:
         self.adapter = None
         self.adapter_properties = None
         self.discovery_started = False
+        self.hci_fd = None
+        self.hci_watch = None
+        self.ble_devices_by_address = {}
         self.readings_by_sensor_id = {}
         self.discovered_order = []
         self.last_persisted_by_wheel = {}
@@ -102,6 +184,7 @@ class TpmsBluezService:
         self.service.add_path("/Bluetooth/StatusText", "Starting")
         self.service.add_path("/Bluetooth/Adapter", "")
         self.service.add_path("/Bluetooth/Discovering", 0)
+        self.service.add_path("/Bluetooth/ReceiverStatus", "Starting")
         self.service.add_path("/Bluetooth/DeviceCount", 0)
         self.service.add_path("/Bluetooth/ManufacturerDataCount", 0)
 
@@ -112,7 +195,6 @@ class TpmsBluezService:
         self._update_slots()
 
         self._connect_bluez()
-        self._start_discovery()
 
     def _ensure_settings(self):
         settings = {}
@@ -186,27 +268,15 @@ class TpmsBluezService:
         return f"{wheel_key}_last_reading"
 
     def _connect_bluez(self):
-        manager = dbus.Interface(self.bus.get_object("org.bluez", "/"), "org.freedesktop.DBus.ObjectManager")
-        objects = manager.GetManagedObjects()
-        for path, ifaces in objects.items():
-            if "org.bluez.Adapter1" in ifaces:
-                self.adapter_path = path
-                break
-        if self.adapter_path is None:
-            self.service["/Bluetooth/StatusText"] = "No adapter"
-            raise RuntimeError("No BlueZ adapter found")
-
-        self.adapter = dbus.Interface(self.bus.get_object("org.bluez", self.adapter_path), "org.bluez.Adapter1")
-        self.adapter_properties = dbus.Interface(
-            self.bus.get_object("org.bluez", self.adapter_path),
-            "org.freedesktop.DBus.Properties",
-        )
-        self.service["/Bluetooth/Adapter"] = self.adapter_path
-        self._update_bluetooth_counts(objects)
         self.bus.add_signal_receiver(
             self._interfaces_added,
             dbus_interface="org.freedesktop.DBus.ObjectManager",
             signal_name="InterfacesAdded",
+        )
+        self.bus.add_signal_receiver(
+            self._interfaces_removed,
+            dbus_interface="org.freedesktop.DBus.ObjectManager",
+            signal_name="InterfacesRemoved",
         )
         self.bus.add_signal_receiver(
             self._properties_changed,
@@ -214,10 +284,206 @@ class TpmsBluezService:
             signal_name="PropertiesChanged",
             path_keyword="path",
         )
+        try:
+            objects = self._get_bluez_objects()
+        except Exception as exc:
+            self._set_bluez_unavailable(exc)
+            return
+        self._sync_adapter(objects)
         for path, ifaces in objects.items():
             props = ifaces.get("org.bluez.Device1")
             if props:
                 self._handle_device(path, props)
+
+    def _get_bluez_objects(self):
+        manager = dbus.Interface(self.bus.get_object("org.bluez", "/"), "org.freedesktop.DBus.ObjectManager")
+        return manager.GetManagedObjects()
+
+    @staticmethod
+    def _adapter_sort_key(path):
+        name = str(path).rsplit("/", 1)[-1]
+        suffix = name[3:] if name.startswith("hci") else ""
+        return (int(suffix) if suffix.isdigit() else sys.maxsize, name)
+
+    def _sync_adapter(self, objects):
+        adapter_paths = sorted(
+            (str(path) for path, ifaces in objects.items() if "org.bluez.Adapter1" in ifaces),
+            key=self._adapter_sort_key,
+        )
+        selected_path = adapter_paths[0] if adapter_paths else None
+        if selected_path == self.adapter_path and self.adapter is not None:
+            return True
+
+        if self.adapter is not None:
+            self._detach_adapter()
+        if selected_path is None:
+            self._set_no_adapter()
+            return False
+
+        try:
+            self.adapter_path = selected_path
+            self.adapter = dbus.Interface(
+                self.bus.get_object("org.bluez", selected_path),
+                "org.bluez.Adapter1",
+            )
+            self.adapter_properties = dbus.Interface(
+                self.bus.get_object("org.bluez", selected_path),
+                "org.freedesktop.DBus.Properties",
+            )
+            self.service["/Bluetooth/Adapter"] = selected_path
+            self._start_hci_listener()
+            self._start_discovery()
+            debug(f"Using Bluetooth adapter {selected_path}")
+            return True
+        except Exception as exc:
+            self._detach_adapter()
+            self.service["/Status"] = 2
+            self.service["/StatusText"] = "Adapter unavailable"
+            self.service["/Bluetooth/StatusText"] = "Adapter unavailable"
+            self.service["/Bluetooth/Discovering"] = 0
+            debug(f"Adapter setup failed: {exc}")
+            return False
+
+    def _detach_adapter(self):
+        if self.discovery_started and self.adapter is not None:
+            try:
+                self.adapter.StopDiscovery()
+            except Exception:
+                pass
+        self.discovery_started = False
+        self._close_hci_listener()
+        self.adapter_path = None
+        self.adapter = None
+        self.adapter_properties = None
+        self.service["/Bluetooth/Adapter"] = ""
+        self.service["/Bluetooth/Discovering"] = 0
+        self.ble_devices_by_address.clear()
+        self._remove_unbound_readings()
+
+    def _set_no_adapter(self):
+        self.service["/Status"] = 2
+        self.service["/StatusText"] = "No adapter"
+        self.service["/Bluetooth/StatusText"] = "No adapter"
+        self.service["/Bluetooth/Discovering"] = 0
+        self.service["/Bluetooth/Adapter"] = ""
+        self._set_receiver_status("Unavailable")
+        self._update_bluetooth_counts({})
+
+    def _set_bluez_unavailable(self, exc):
+        self._detach_adapter()
+        self.service["/Status"] = 2
+        self.service["/StatusText"] = "BlueZ unavailable"
+        self.service["/Bluetooth/StatusText"] = "Unavailable"
+        self.service["/Bluetooth/Discovering"] = 0
+        debug(f"BlueZ unavailable: {exc}")
+
+    def _start_hci_listener(self):
+        fd = None
+        try:
+            adapter_name = self.adapter_path.rsplit("/", 1)[-1]
+            if not adapter_name.startswith("hci"):
+                raise ValueError(f"Unsupported adapter path: {self.adapter_path}")
+            adapter_index = int(adapter_name[3:])
+
+            libc = ctypes.CDLL(None, use_errno=True)
+            fd = libc.socket(AF_BLUETOOTH, SOCK_RAW, BTPROTO_HCI)
+            if fd < 0:
+                raise OSError(ctypes.get_errno(), "HCI socket failed")
+
+            address = SockaddrHci(AF_BLUETOOTH, adapter_index, 0)
+            if libc.bind(fd, ctypes.byref(address), ctypes.sizeof(address)) != 0:
+                error = ctypes.get_errno()
+                os.close(fd)
+                raise OSError(error, "HCI socket bind failed")
+
+            filter_data = struct.pack(
+                "=IIIH",
+                1 << HCI_EVENT_PKT,
+                0,
+                1 << (EVT_LE_META_EVENT - 32),
+                0,
+            )
+            filter_buffer = ctypes.create_string_buffer(filter_data)
+            if libc.setsockopt(fd, SOL_HCI, HCI_FILTER, filter_buffer, len(filter_data)) != 0:
+                error = ctypes.get_errno()
+                os.close(fd)
+                raise OSError(error, "HCI event filter failed")
+
+            flags = fcntl.fcntl(fd, fcntl.F_GETFL)
+            fcntl.fcntl(fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+            self.hci_fd = fd
+            self.hci_watch = GLib.io_add_watch(
+                fd,
+                GLib.IO_IN | GLib.IO_ERR | GLib.IO_HUP,
+                self._hci_data_available,
+            )
+            self._set_receiver_status("Listening")
+            debug(f"Listening for raw HCI advertisements on {adapter_name}")
+        except Exception as exc:
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+            self.hci_fd = None
+            self.hci_watch = None
+            self._set_receiver_status("Unavailable")
+            debug(f"Raw HCI listener unavailable, using BlueZ Device1 data: {exc}")
+
+    def _hci_data_available(self, _source, condition):
+        if condition & (GLib.IO_ERR | GLib.IO_HUP):
+            debug("Raw HCI listener closed")
+            self._close_hci_listener(remove_watch=False)
+            return False
+        while True:
+            try:
+                packet = os.read(self.hci_fd, 2048)
+            except OSError as exc:
+                if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                    break
+                debug(f"Raw HCI read failed: {exc}")
+                self._close_hci_listener(remove_watch=False)
+                return False
+            if not packet:
+                self._close_hci_listener(remove_watch=False)
+                return False
+            self._set_receiver_status("Receiving")
+            self._handle_hci_packet(packet)
+        return True
+
+    def _ensure_hci_listener(self):
+        if self.adapter is None or self.hci_fd is not None:
+            return
+        self._set_receiver_status("Restarting")
+        self._start_hci_listener()
+
+    def _set_receiver_status(self, value):
+        if self.service["/Bluetooth/ReceiverStatus"] != value:
+            self.service["/Bluetooth/ReceiverStatus"] = value
+
+    def _close_hci_listener(self, remove_watch=True):
+        if self.hci_watch is not None and remove_watch:
+            GLib.source_remove(self.hci_watch)
+        self.hci_watch = None
+        if self.hci_fd is not None:
+            try:
+                os.close(self.hci_fd)
+            except OSError:
+                pass
+            self.hci_fd = None
+        self._set_receiver_status("Unavailable")
+
+    def _handle_hci_packet(self, packet):
+        for report in parse_hci_le_advertising_reports(packet):
+            name, manufacturer_data = parse_advertisement_data(report["data"])
+            self._record_ble_activity(
+                report["address"],
+                name,
+                report["rssi"],
+                bool(manufacturer_data),
+            )
+            for data in manufacturer_data:
+                self._handle_manufacturer_data(report["address"], name, report["rssi"], data)
 
     def _start_discovery(self):
         self.adapter.SetDiscoveryFilter({"Transport": dbus.String("le"), "DuplicateData": dbus.Boolean(True)})
@@ -229,18 +495,20 @@ class TpmsBluezService:
         self.service["/Bluetooth/Discovering"] = 1
 
     def _ensure_discovery(self):
-        if self.adapter is None:
+        try:
+            objects = self._get_bluez_objects()
+        except Exception as exc:
+            self._set_bluez_unavailable(exc)
+            return
+        if not self._sync_adapter(objects):
             return
         try:
             discovering = bool(self.adapter_properties.Get("org.bluez.Adapter1", "Discovering"))
-            objects = dbus.Interface(
-                self.bus.get_object("org.bluez", "/"),
-                "org.freedesktop.DBus.ObjectManager",
-            ).GetManagedObjects()
         except Exception as exc:
+            self._detach_adapter()
             self.service["/Status"] = 2
-            self.service["/StatusText"] = "BlueZ unavailable"
-            self.service["/Bluetooth/StatusText"] = "Unavailable"
+            self.service["/StatusText"] = "Adapter unavailable"
+            self.service["/Bluetooth/StatusText"] = "Adapter unavailable"
             self.service["/Bluetooth/Discovering"] = 0
             debug(f"Discovering check failed: {exc}")
             return
@@ -262,6 +530,20 @@ class TpmsBluezService:
             debug(f"StartDiscovery failed: {exc}")
 
     def _update_bluetooth_counts(self, objects):
+        if self.hci_fd is not None:
+            now = int(time.time())
+            cutoff = now - BLE_ACTIVITY_WINDOW_SECONDS
+            self.ble_devices_by_address = {
+                address: device
+                for address, device in self.ble_devices_by_address.items()
+                if device["last_seen"] >= cutoff
+            }
+            self.service["/Bluetooth/DeviceCount"] = len(self.ble_devices_by_address)
+            self.service["/Bluetooth/ManufacturerDataCount"] = sum(
+                1 for device in self.ble_devices_by_address.values() if device["has_manufacturer_data"]
+            )
+            return
+
         device_count = 0
         manufacturer_data_count = 0
         for _path, ifaces in objects.items():
@@ -275,36 +557,62 @@ class TpmsBluezService:
         self.service["/Bluetooth/ManufacturerDataCount"] = manufacturer_data_count
 
     def _interfaces_added(self, path, ifaces):
+        if "org.bluez.Adapter1" in ifaces:
+            try:
+                self._sync_adapter(self._get_bluez_objects())
+            except Exception as exc:
+                self._set_bluez_unavailable(exc)
+            return
         props = ifaces.get("org.bluez.Device1")
         if props:
             self._handle_device(path, props)
+
+    def _interfaces_removed(self, _path, interfaces):
+        if "org.bluez.Adapter1" not in interfaces:
+            return
+        try:
+            self._sync_adapter(self._get_bluez_objects())
+        except Exception as exc:
+            self._set_bluez_unavailable(exc)
 
     def _properties_changed(self, interface, changed, _invalidated, path=None):
         if interface == "org.bluez.Device1":
             self._handle_device(path, changed)
 
     def _handle_device(self, path, props):
-        mfg = props.get("ManufacturerData")
-        if not mfg:
-            return
-
         address = str(props.get("Address", path.rsplit("/", 1)[-1]))
         name = str(props.get("Name") or props.get("Alias") or "")
         rssi = props.get("RSSI")
-        now = int(time.time())
+        mfg = props.get("ManufacturerData")
+        self._record_ble_activity(address, name, rssi, bool(mfg))
+        if not mfg:
+            return
 
         for company, payload in mfg.items():
             manufacturer_data = int(company).to_bytes(2, "little") + bytes_from_dbus_array(payload)
-            parsed = parse_tpms_manufacturer_data(manufacturer_data)
-            if parsed is None:
-                continue
-            parsed.update({
-                "address": address,
-                "name": name,
-                "rssi": int(rssi) if rssi is not None else None,
-                "last_seen": now,
-            })
-            self._update_reading(parsed)
+            self._handle_manufacturer_data(address, name, rssi, manufacturer_data)
+
+    def _record_ble_activity(self, address, name, rssi, has_manufacturer_data):
+        now = int(time.time())
+        existing = self.ble_devices_by_address.get(address, {})
+        self.ble_devices_by_address[address] = {
+            "last_seen": now,
+            "name": name or existing.get("name", ""),
+            "rssi": int(rssi) if rssi is not None else existing.get("rssi"),
+            "has_manufacturer_data": bool(has_manufacturer_data or existing.get("has_manufacturer_data")),
+        }
+
+    def _handle_manufacturer_data(self, address, name, rssi, manufacturer_data):
+        parsed = parse_tpms_manufacturer_data(manufacturer_data)
+        if parsed is None:
+            return
+        parsed.update({
+            "address": address,
+            "name": name or self.ble_devices_by_address.get(address, {}).get("name", ""),
+            "rssi": int(rssi) if rssi is not None else None,
+            "last_seen": int(time.time()),
+        })
+        self._update_reading(parsed)
 
     def _update_reading(self, reading):
         sensor_id = reading["sensor_id"]
@@ -313,6 +621,28 @@ class TpmsBluezService:
         self._refresh_discovered_order()
         self._update_discovered_paths()
         self._update_slots()
+
+    def _prune_expired_readings(self):
+        cutoff = int(time.time()) - BLE_ACTIVITY_WINDOW_SECONDS
+        self._remove_unbound_readings(lambda reading: reading["last_seen"] < cutoff)
+
+    def _remove_unbound_readings(self, should_remove=lambda _reading: True):
+        bound_sensor_ids = {
+            self.settings[wheel_key]
+            for wheel_key, _, _ in WHEELS
+            if self.settings[wheel_key]
+        }
+        expired = [
+            sensor_id
+            for sensor_id, reading in self.readings_by_sensor_id.items()
+            if sensor_id not in bound_sensor_ids and should_remove(reading)
+        ]
+        if not expired:
+            return
+        for sensor_id in expired:
+            del self.readings_by_sensor_id[sensor_id]
+        self._refresh_discovered_order()
+        self._update_discovered_paths()
 
     def _persist_bound_reading(self, reading):
         now = int(time.time())
@@ -586,11 +916,14 @@ class TpmsBluezService:
 
     def tick(self):
         self._ensure_discovery()
+        self._ensure_hci_listener()
+        self._prune_expired_readings()
         self._update_slots()
         return True
 
     def stop(self):
         self.service["/Connected"] = 0
+        self._close_hci_listener()
         if self.discovery_started:
             try:
                 self.adapter.StopDiscovery()

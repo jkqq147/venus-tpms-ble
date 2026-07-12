@@ -53,12 +53,17 @@ MbPage {
 		}
 
 		MbItemValue {
-			description: qsTr("BLE devices")
+			description: qsTr("BLE receiver")
+			item.bind: "com.victronenergy.tpms.main/Bluetooth/ReceiverStatus"
+		}
+
+		MbItemValue {
+			description: qsTr("BLE activity (5 min)")
 			item.bind: "com.victronenergy.tpms.main/Bluetooth/DeviceCount"
 		}
 
 		MbItemValue {
-			description: qsTr("BLE manufacturer data")
+			description: qsTr("Manufacturer data (5 min)")
 			item.bind: "com.victronenergy.tpms.main/Bluetooth/ManufacturerDataCount"
 		}
 

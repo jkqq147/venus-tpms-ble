@@ -30,6 +30,13 @@ wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/instal
 /data/venus-tpms-ble
 ```
 
+Venus OS 可以正常升级。系统升级可能替换 GX 的界面文件；升级完成后再次运行同一条
+安装命令，即可恢复 `TPMS` 菜单和界面接入。
+
+服务不绑定特定蓝牙型号或 `hci` 编号，而是使用 BlueZ 中编号最小、可扫描 BLE 的适配器。
+运行中可以插拔 USB 蓝牙适配器：拔出后扫描暂停，重新出现后会自动恢复；已绑定轮位会保留
+最后一次读数。
+
 ## 首次设置
 
 1. 打开 GX 本机界面。
@@ -44,6 +51,9 @@ wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/instal
 6. 重复以上步骤，直到需要的轮位都绑定完成。
 
 `Discovered` 列表会显示胎压、温度和 RSSI，方便判断哪个传感器更近或正在广播。
+
+未绑定传感器是临时数据：五分钟没有再次收到广播后，会从 `Discovered` 列表移除。
+已绑定的轮位会保留最后一次读数；传感器停止广播后显示为 `Stale`。
 
 ## 显示含义
 
@@ -62,7 +72,11 @@ wget -O - https://raw.githubusercontent.com/jkqq147/venus-tpms-ble/master/instal
 
 进入 `TPMS` 页面后，每个轮位会显示胎压、温度和状态。打开某个轮位可以查看传感器 ID、电量、RSSI 和最后接收时间。
 
-同一页面也会显示蓝牙状态和 BLE 设备数量。如果 `Bluetooth` 不是 `Scanning`，优先检查蓝牙适配器或 BlueZ discovery。
+同一页面也会显示蓝牙状态和近期 BLE 活动。`BLE activity (5 min)` 表示最近五分钟内
+实际广播过的不同 BLE 设备数量；`Manufacturer data (5 min)` 表示其中带 manufacturer
+data 的设备数量。这两个数值仅用于辅助判断扫描是否有工作。如果 `Bluetooth` 不是
+`Scanning`，优先检查蓝牙适配器或 BlueZ discovery。
+`BLE receiver` 在收到原始广播时应显示为 `Receiving`；若接收器关闭，服务会自动重建。
 
 ## 更新
 
