@@ -46,8 +46,11 @@ front left / front right / rear left / rear right
 - `6.17*`: last-known pressure; the reading is stale.
 
 Unbound discoveries expire after five minutes without another advertisement.
-Bound wheels keep their last reading across restarts and become `Stale` when a
-fresh advertisement is overdue.
+Only wheel-to-sensor bindings are stored. Live pressure, temperature, signal,
+and last-seen values remain in memory and are never written to flash. After a
+restart, a bound wheel shows `wait` until its next advertisement arrives. A
+reading becomes `Stale` when a fresh advertisement is overdue during the same
+service session.
 
 ## Bluetooth Status
 

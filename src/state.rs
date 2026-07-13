@@ -1,8 +1,10 @@
 #![cfg_attr(feature = "hci-test", allow(dead_code))]
 
 use std::{
-    collections::{HashMap, HashSet},
-    fs, io,
+    collections::{BTreeMap, HashMap, HashSet},
+    fs::{self, File, OpenOptions},
+    io::{self, Write},
+    os::unix::fs::OpenOptionsExt,
     path::PathBuf,
     time::{SystemTime, UNIX_EPOCH},
 };
@@ -11,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 pub const DISCOVERED_LIMIT: usize = 10;
 
-#[derive(Debug, Clone, Copy, Eq, Hash, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Wheel {
     FrontLeft,
@@ -74,23 +76,12 @@ impl Reading {
             &self.sensor_id[self.sensor_id.len().saturating_sub(6)..]
         )
     }
-
-    pub fn core_values_equal(&self, other: &Self) -> bool {
-        self.sensor_id == other.sensor_id
-            && self.name == other.name
-            && self.pressure_bar == other.pressure_bar
-            && self.temperature_c == other.temperature_c
-            && self.battery_percent == other.battery_percent
-            && self.alarm == other.alarm
-    }
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 struct PersistentState {
     #[serde(default)]
-    bindings: HashMap<Wheel, String>,
-    #[serde(default)]
-    last_readings: HashMap<Wheel, Reading>,
+    bindings: BTreeMap<Wheel, String>,
 }
 
 pub struct TpmsState {
@@ -129,65 +120,23 @@ impl TpmsState {
     }
 
     pub fn bind(&mut self, wheel: Option<Wheel>, sensor_id: &str) -> io::Result<()> {
-        for candidate in Wheel::ALL {
-            if self.binding(candidate) == sensor_id || Some(candidate) == wheel {
-                self.persistent.bindings.insert(candidate, String::new());
-            }
+        let mut next = self.persistent.clone();
+        next.bindings.retain(|candidate, bound| {
+            bound != sensor_id && Some(*candidate) != wheel && !bound.is_empty()
+        });
+        if let Some(wheel) = wheel.filter(|_| !sensor_id.is_empty()) {
+            next.bindings.insert(wheel, sensor_id.to_owned());
         }
-        if let Some(wheel) = wheel {
-            self.persistent.bindings.insert(wheel, sensor_id.to_owned());
-            if let Some(reading) = self.readings.get(sensor_id) {
-                self.persistent.last_readings.insert(wheel, reading.clone());
-            }
+        if next == self.persistent {
+            return Ok(());
         }
-        self.save()
-    }
-
-    pub fn update(&mut self, reading: Reading) -> io::Result<()> {
-        let sensor_id = reading.sensor_id.clone();
-        self.readings.insert(sensor_id.clone(), reading.clone());
-
-        let mut persist = false;
-        for wheel in Wheel::ALL {
-            if self.binding(wheel) == sensor_id {
-                let needs_write = self
-                    .persistent
-                    .last_readings
-                    .get(&wheel)
-                    .is_none_or(|previous| !previous.core_values_equal(&reading));
-                if needs_write {
-                    self.persistent.last_readings.insert(wheel, reading.clone());
-                    persist = true;
-                }
-            }
-        }
-        if persist {
-            self.save()?;
-        }
+        self.save(&next)?;
+        self.persistent = next;
         Ok(())
     }
 
-    pub fn checkpoint_live_readings(&mut self) -> io::Result<bool> {
-        let mut changed = false;
-        for wheel in Wheel::ALL {
-            let sensor_id = self.binding(wheel).to_owned();
-            let Some(reading) = self.readings.get(&sensor_id) else {
-                continue;
-            };
-            let needs_write = self
-                .persistent
-                .last_readings
-                .get(&wheel)
-                .is_none_or(|previous| previous.last_seen != reading.last_seen);
-            if needs_write {
-                self.persistent.last_readings.insert(wheel, reading.clone());
-                changed = true;
-            }
-        }
-        if changed {
-            self.save()?;
-        }
-        Ok(changed)
+    pub fn update(&mut self, reading: Reading) {
+        self.readings.insert(reading.sensor_id.clone(), reading);
     }
 
     pub fn prune_expired_unbound(&mut self, now: i64, max_age_seconds: i64) -> bool {
@@ -240,29 +189,36 @@ impl TpmsState {
         selected
     }
 
-    pub fn reading_for_wheel(&self, wheel: Wheel) -> Option<(&Reading, bool)> {
+    pub fn reading_for_wheel(&self, wheel: Wheel) -> Option<&Reading> {
         let sensor_id = self.binding(wheel);
         if sensor_id.is_empty() {
             return None;
         }
-        if let Some(reading) = self.readings.get(sensor_id) {
-            return Some((reading, false));
-        }
-        self.persistent
-            .last_readings
-            .get(&wheel)
-            .filter(|reading| reading.sensor_id == sensor_id)
-            .map(|reading| (reading, true))
+        self.readings.get(sensor_id)
     }
 
-    fn save(&self) -> io::Result<()> {
+    fn save(&self, persistent: &PersistentState) -> io::Result<()> {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
+        let encoded = serde_json::to_vec(persistent).map_err(io::Error::other)?;
+        if fs::read(&self.path).is_ok_and(|current| current == encoded) {
+            return Ok(());
+        }
         let temporary = self.path.with_extension("json.tmp");
-        let encoded = serde_json::to_vec(&self.persistent).map_err(io::Error::other)?;
-        fs::write(&temporary, encoded)?;
-        fs::rename(temporary, &self.path)
+        let mut file = OpenOptions::new()
+            .create(true)
+            .truncate(true)
+            .write(true)
+            .mode(0o600)
+            .open(&temporary)?;
+        file.write_all(&encoded)?;
+        file.sync_all()?;
+        fs::rename(&temporary, &self.path)?;
+        if let Some(parent) = self.path.parent() {
+            let _ = File::open(parent).and_then(|directory| directory.sync_all());
+        }
+        Ok(())
     }
 }
 
@@ -275,6 +231,8 @@ pub fn unix_time() -> i64 {
 
 #[cfg(test)]
 mod tests {
+    use std::{fs, os::unix::fs::MetadataExt, thread, time::Duration};
+
     use super::{Reading, TpmsState, Wheel};
 
     fn reading(id: &str, rssi: i32) -> Reading {
@@ -295,7 +253,7 @@ mod tests {
     fn binding_is_unique_across_wheels_and_sensors() {
         let directory = tempfile::tempdir().unwrap();
         let mut state = TpmsState::load(directory.path().join("state.json")).unwrap();
-        state.update(reading("A", -70)).unwrap();
+        state.update(reading("A", -70));
         state.bind(Some(Wheel::FrontLeft), "A").unwrap();
         state.bind(Some(Wheel::RearRight), "A").unwrap();
         assert_eq!(state.binding(Wheel::FrontLeft), "");
@@ -303,13 +261,27 @@ mod tests {
     }
 
     #[test]
+    fn repeated_binding_does_not_rewrite_unchanged_configuration() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        let mut state = TpmsState::load(&path).unwrap();
+        state.bind(Some(Wheel::FrontLeft), "A").unwrap();
+        let before = fs::metadata(&path).unwrap();
+        thread::sleep(Duration::from_millis(20));
+
+        state.bind(Some(Wheel::FrontLeft), "A").unwrap();
+
+        let after = fs::metadata(&path).unwrap();
+        assert_eq!(before.ino(), after.ino());
+        assert_eq!(before.modified().unwrap(), after.modified().unwrap());
+    }
+
+    #[test]
     fn discovered_is_limited_and_sorted_by_signal() {
         let directory = tempfile::tempdir().unwrap();
         let mut state = TpmsState::load(directory.path().join("state.json")).unwrap();
         for index in 0..12 {
-            state
-                .update(reading(&format!("S{index}"), -100 + index))
-                .unwrap();
+            state.update(reading(&format!("S{index}"), -100 + index));
         }
         let discovered = state.discovered();
         assert_eq!(discovered.len(), 10);
@@ -317,46 +289,53 @@ mod tests {
     }
 
     #[test]
-    fn checkpoint_persists_new_timestamp_without_value_change() {
+    fn live_readings_are_never_persisted() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("state.json");
         let mut state = TpmsState::load(&path).unwrap();
         state.bind(Some(Wheel::FrontLeft), "sensor").unwrap();
+        let persisted = fs::read(&path).unwrap();
 
-        let first = reading("sensor", -70);
-        state.update(first).unwrap();
-        let mut second = reading("sensor", -70);
-        second.last_seen = 61;
-        state.update(second).unwrap();
+        state.update(reading("sensor", -70));
+        let mut changed = reading("sensor", -60);
+        changed.pressure_bar = 7.2;
+        changed.temperature_c = 42.0;
+        changed.last_seen = 61;
+        state.update(changed);
 
-        let before = TpmsState::load(&path).unwrap();
-        assert_eq!(
-            before
-                .reading_for_wheel(Wheel::FrontLeft)
-                .unwrap()
-                .0
-                .last_seen,
-            1
-        );
+        assert_eq!(fs::read(&path).unwrap(), persisted);
+        assert!(!String::from_utf8(persisted)
+            .unwrap()
+            .contains("last_readings"));
+        let reloaded = TpmsState::load(&path).unwrap();
+        assert_eq!(reloaded.binding(Wheel::FrontLeft), "sensor");
+        assert!(reloaded.reading_for_wheel(Wheel::FrontLeft).is_none());
+    }
 
-        assert!(state.checkpoint_live_readings().unwrap());
-        let after = TpmsState::load(&path).unwrap();
-        assert_eq!(
-            after
-                .reading_for_wheel(Wheel::FrontLeft)
-                .unwrap()
-                .0
-                .last_seen,
-            61
-        );
+    #[test]
+    fn legacy_live_readings_are_ignored_without_rewriting_the_file() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("state.json");
+        let legacy = br#"{"bindings":{"front_left":"sensor"},"last_readings":{"sensor":{"pressure_bar":6.1}}}"#;
+        fs::write(&path, legacy).unwrap();
+        let before = fs::metadata(&path).unwrap();
+
+        let state = TpmsState::load(&path).unwrap();
+
+        let after = fs::metadata(&path).unwrap();
+        assert_eq!(state.binding(Wheel::FrontLeft), "sensor");
+        assert!(state.reading_for_wheel(Wheel::FrontLeft).is_none());
+        assert_eq!(fs::read(&path).unwrap(), legacy);
+        assert_eq!(before.ino(), after.ino());
+        assert_eq!(before.modified().unwrap(), after.modified().unwrap());
     }
 
     #[test]
     fn pruning_keeps_bound_sensor_only() {
         let directory = tempfile::tempdir().unwrap();
         let mut state = TpmsState::load(directory.path().join("state.json")).unwrap();
-        state.update(reading("bound", -80)).unwrap();
-        state.update(reading("unbound", -60)).unwrap();
+        state.update(reading("bound", -80));
+        state.update(reading("unbound", -60));
         state.bind(Some(Wheel::FrontLeft), "bound").unwrap();
 
         assert!(state.prune_expired_unbound(400, 300));

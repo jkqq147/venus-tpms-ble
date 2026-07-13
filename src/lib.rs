@@ -84,7 +84,7 @@ pub fn run_service() -> Result<(), Box<dyn std::error::Error>> {
 
         match events_rx.recv_timeout(Duration::from_secs(1)) {
             Ok(Event::Reading(reading)) => {
-                state.update(reading)?;
+                state.update(reading);
                 publisher.publish(&state, STALE_SECONDS, bluetooth_stats)?;
             }
             Ok(Event::ScanStats {
@@ -119,7 +119,6 @@ pub fn run_service() -> Result<(), Box<dyn std::error::Error>> {
         }
         if last_maintenance.elapsed() >= Duration::from_secs(30) {
             state.prune_expired_unbound(unix_time(), DISCOVERED_MAX_AGE_SECONDS);
-            state.checkpoint_live_readings()?;
             publisher.publish(&state, STALE_SECONDS, bluetooth_stats)?;
             last_maintenance = Instant::now();
         }

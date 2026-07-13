@@ -221,12 +221,12 @@ impl VenusPublisher {
             self.clear_wheel(&root, wheel, "Unassigned", UNASSIGNED, "--")?;
             return Ok("--".to_owned());
         }
-        let Some((reading, persisted)) = state.reading_for_wheel(wheel) else {
+        let Some(reading) = state.reading_for_wheel(wheel) else {
             self.clear_wheel(&root, wheel, "Waiting", "waiting", "wait")?;
             self.string(&format!("{root}/SensorId"), sensor_id)?;
             return Ok("wait".to_owned());
         };
-        let stale = persisted || now - reading.last_seen > stale_seconds;
+        let stale = now - reading.last_seen > stale_seconds;
         let state_key = if stale { "stale" } else { "ok" };
         let state_text = if stale { "Stale" } else { "OK" };
         self.string(&format!("{root}/Name"), &reading.display_name())?;
