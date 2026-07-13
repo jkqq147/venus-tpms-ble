@@ -11,6 +11,7 @@ const PROPERTIES_INTERFACE: &str = "org.freedesktop.DBus.Properties";
 
 pub struct BluezDiscovery<'a> {
     adapter: Proxy<'a>,
+    properties: Proxy<'a>,
     owned: bool,
 }
 
@@ -33,8 +34,19 @@ impl<'a> BluezDiscovery<'a> {
 
         Ok(Self {
             adapter,
+            properties,
             owned: !discovering,
         })
+    }
+
+    pub fn is_active(&self) -> bool {
+        let discovering: zbus::Result<OwnedValue> = self
+            .properties
+            .call("Get", &(ADAPTER_INTERFACE, "Discovering"));
+        discovering
+            .ok()
+            .and_then(|value| bool::try_from(value).ok())
+            .unwrap_or(false)
     }
 }
 

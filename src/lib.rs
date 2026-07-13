@@ -45,7 +45,9 @@ pub fn run_service() -> Result<(), Box<dyn std::error::Error>> {
     eprintln!("publishing {service_name} from native HCI");
     let mut last_maintenance = Instant::now();
     let mut last_adapter_attempt = Instant::now() - Duration::from_secs(5);
+    let mut last_discovery_check = Instant::now() - Duration::from_secs(5);
     let mut discovery = None;
+    let mut scanner_running = false;
     loop {
         if discovery.is_none() && last_adapter_attempt.elapsed() >= Duration::from_secs(5) {
             last_adapter_attempt = Instant::now();
@@ -59,10 +61,25 @@ pub fn run_service() -> Result<(), Box<dyn std::error::Error>> {
                         active: true,
                         ..BluetoothStats::default()
                     };
-                    spawn_scanner(adapter_index, events_tx.clone());
+                    if !scanner_running {
+                        spawn_scanner(adapter_index, events_tx.clone());
+                        scanner_running = true;
+                    }
                     publisher.publish(&state, STALE_SECONDS, bluetooth_stats)?;
                 }
             }
+        }
+
+        if last_discovery_check.elapsed() >= Duration::from_secs(5) {
+            if let Some(active_discovery) = discovery.as_ref() {
+                if !active_discovery.is_active() {
+                    eprintln!("BlueZ discovery stopped; reconnecting");
+                    discovery = None;
+                    bluetooth_stats = BluetoothStats::default();
+                    publisher.publish(&state, STALE_SECONDS, bluetooth_stats)?;
+                }
+            }
+            last_discovery_check = Instant::now();
         }
 
         match events_rx.recv_timeout(Duration::from_secs(1)) {
@@ -91,6 +108,7 @@ pub fn run_service() -> Result<(), Box<dyn std::error::Error>> {
             Ok(Event::ScannerFailed(error)) => {
                 eprintln!("HCI scanner stopped: {error}");
                 discovery = None;
+                scanner_running = false;
                 bluetooth_stats = BluetoothStats::default();
                 publisher.publish(&state, STALE_SECONDS, bluetooth_stats)?;
             }
